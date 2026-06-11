@@ -1,0 +1,14 @@
+# webshare signaling server — deploy to YOUR OWN Cloudflare account:
+#   cd signal && npx wrangler login && pnpm deploy
+# Free plan is plenty (Durable Objects on SQLite backend).
+name = "webshare-signal"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDO"]
