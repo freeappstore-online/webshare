@@ -18,9 +18,9 @@
   --glass: rgba(255, 255, 255, 0.7);
   --glass-hover: rgba(255, 255, 255, 0.85);
   --glass-strong: rgba(255, 255, 255, 0.88);
-  --accent: #d86f4d;
-  --accent-soft: #ffd4bf;
-  --accent-deep: #9f4427;
+  --accent: #007AFF;
+  --accent-soft: #cce4ff;
+  --accent-deep: #0055b3;
   --sky: #4c97b5;
   --sky-soft: #c6e6f2;
   --sky-deep: #245b73;
@@ -30,21 +30,30 @@
   --success: #2f8f57;
   --warning: #c6862a;
   --error: #c74f43;
-  --accent-gradient: linear-gradient(135deg, rgba(216, 111, 77, 0.18), rgba(255, 255, 255, 0.9));
-  --warm-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 212, 191, 0.24));
+  --accent-gradient: linear-gradient(135deg, rgba(0, 122, 255, 0.18), rgba(255, 255, 255, 0.9));
+  --warm-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(204, 228, 255, 0.24));
   --cool-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(198, 230, 242, 0.28));
   --mint-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(204, 231, 213, 0.28));
   --card-gradient: linear-gradient(180deg, #ffffff, #f5f5f5);
-  --bg-start: #ffffff;
-  --bg-mid: #fafafa;
-  --bg-end: #f5f5f5;
-  --glow-warm: rgba(216, 111, 77, 0.16);
+  --bg-start: #f1f1f1;
+  --bg-mid: #ececec;
+  --bg-end: #e6e6e6;
+  --glow-warm: rgba(0, 122, 255, 0.16);
   --glow-cool: rgba(76, 151, 181, 0.16);
-  --bg-blob-1: rgba(216, 111, 77, 0.07);
+  --bg-blob-1: rgba(0, 122, 255, 0.07);
   --bg-blob-2: rgba(76, 151, 181, 0.07);
   --content-scale: 1;
   --shadow-soft: 0 28px 70px rgba(24, 44, 104, 0.12);
   --shadow-card: 0 12px 28px rgba(26, 41, 81, 0.08);
+
+  /* Floating window (edit profile etc.) */
+  --float-bg: var(--card-gradient);
+  --float-border: #666666;
+  --float-input-bg: var(--paper-deep);
+  --float-pill-active: #ffffff;
+  --float-pill-bg: #ededed;
+  /* page behind the standalone welcome window */
+  --welcome-bg: #c9c9c9;
 
   /* Standard SDK tokens (aliases to template vars) */
   --bg: var(--paper);
@@ -75,9 +84,9 @@
   --glass: rgba(26, 26, 26, 0.8);
   --glass-hover: rgba(38, 38, 38, 0.9);
   --glass-strong: rgba(16, 16, 16, 0.9);
-  --accent: #ff9b76;
-  --accent-soft: #3b2119;
-  --accent-deep: #ffd9cb;
+  --accent: #0A84FF;
+  --accent-soft: #0e2a4a;
+  --accent-deep: #9ccaff;
   --sky: #89cbe5;
   --sky-soft: #122632;
   --sky-deep: #d3f0fb;
@@ -87,20 +96,30 @@
   --success: #74d49a;
   --warning: #f0bd6e;
   --error: #ff7a72;
-  --accent-gradient: linear-gradient(135deg, rgba(255, 155, 118, 0.12), rgba(18, 18, 18, 0.95));
-  --warm-gradient: linear-gradient(180deg, rgba(14, 14, 14, 0.96), rgba(59, 33, 25, 0.34));
+  --accent-gradient: linear-gradient(135deg, rgba(10, 132, 255, 0.12), rgba(18, 18, 18, 0.95));
+  --warm-gradient: linear-gradient(180deg, rgba(14, 14, 14, 0.96), rgba(14, 42, 74, 0.34));
   --cool-gradient: linear-gradient(180deg, rgba(14, 14, 14, 0.96), rgba(18, 38, 50, 0.3));
   --mint-gradient: linear-gradient(180deg, rgba(14, 14, 14, 0.96), rgba(19, 40, 26, 0.28));
   --card-gradient: linear-gradient(180deg, #141414, #1a1a1a);
   --bg-start: #000000;
   --bg-mid: #050505;
   --bg-end: #0a0a0a;
-  --glow-warm: rgba(255, 155, 118, 0.07);
+  --glow-warm: rgba(10, 132, 255, 0.07);
   --glow-cool: rgba(137, 203, 229, 0.06);
-  --bg-blob-1: rgba(255, 155, 118, 0.05);
+  --bg-blob-1: rgba(10, 132, 255, 0.05);
   --bg-blob-2: rgba(137, 203, 229, 0.05);
   --shadow-soft: 0 28px 70px rgba(0, 0, 0, 0.6);
   --shadow-card: 0 12px 28px rgba(0, 0, 0, 0.4);
+
+  /* Floating window: gently lifted bg, border a touch brighter than the surface,
+     inputs inset darker than the bg */
+  --float-bg: linear-gradient(180deg, #202020, #262626);
+  --float-border: #3a3a3a;
+  --float-input-bg: #161616;
+  --float-pill-active: #404040;
+  --float-pill-bg: var(--float-input-bg);
+  /* dark mode keeps its normal page background behind the welcome window */
+  --welcome-bg: transparent;
 }
 
 html {
@@ -204,3 +223,45 @@ a:focus-visible {
 }
 
 } /* end @layer base */
+
+/* Solid color layer under the body's decorative gradients — never lets the
+   white canvas show through, and gives theme transitions something to fade */
+body {
+  background-color: var(--bg-mid);
+}
+
+/* Theme swaps run inside a View Transition (see lib/themeFade.ts): the whole
+   page crossfades as one snapshot, text included. This just sets the pace. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 220ms;
+  animation-timing-function: ease-in-out;
+}
+
+/* FloatingWindow enter/exit (fade + slide from top).
+   Opacity is front-loaded on enter and held until late on exit, so the
+   window never looks like it vanishes before it finishes moving. */
+@keyframes ws-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* backdrop undims steadily for the whole exit — no hold (that's only for the window) */
+@keyframes ws-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes ws-drop-in {
+  0% { opacity: 0; transform: translateY(-28px); }
+  45% { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0); }
+}
+/* main page content arriving (e.g. right after first-run setup) */
+@keyframes ws-page-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes ws-drop-out {
+  0% { opacity: 1; transform: translateY(0); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-28px); }
+}
