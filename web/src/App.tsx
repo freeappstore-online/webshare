@@ -1,16 +1,16 @@
-import { useState } from 'react'
+import { useRef, useState, type RefObject } from 'react'
 import { useTheme } from '@freeappstore/sdk/hooks'
 import { BuildInfo, Footer } from '@freeappstore/sdk/ui'
 import { ThemeButton } from './components/ThemeButton'
 import { EditProfileWindow } from './components/EditProfileWindow'
 import { FloatingWindow } from './components/FloatingWindow'
 import { IncomingShare } from './components/IncomingShare'
-import { CloseIcon, WebshareLogo } from './components/icons'
+import { CloseIcon, UploadIcon, WebshareLogo } from './components/icons'
 import { ProfileForm } from './components/ProfileForm'
 import { useProfile } from './hooks/useProfile'
 import { withThemeFade } from './lib/themeFade'
 import { useShareRoom } from './hooks/useShareRoom'
-import { toFileMeta } from './lib/files'
+import { mergeFiles, toFileMeta } from './lib/files'
 import { FilesPage } from './pages/FilesPage'
 import { SharePage } from './pages/SharePage'
 import type { PeerInfo, Profile } from './types'
@@ -42,6 +42,13 @@ export default function App() {
   // refresh with an existing profile renders instantly
   const [justRegistered, setJustRegistered] = useState(false)
 
+  // staged files live here so the nav bar can host the add-files button;
+  // the hidden file input itself renders inside FilesPage
+  const [page, setPage] = useState<'files' | 'share'>('files')
+  const [files, setFiles] = useState<File[]>([])
+  const [navDragOver, setNavDragOver] = useState(false)
+  const fileInput = useRef<HTMLInputElement>(null)
+
   const pageAnimation = resetting
     ? 'ws-fade-out 380ms ease-in-out forwards'
     : justRegistered
@@ -63,7 +70,9 @@ export default function App() {
       {/* no nav bar — logo top-left, theme toggle top-right; hidden until first-run setup is done */}
       {profile && (
         <header
-          className="flex items-center justify-between px-3 pt-3"
+          // equal 1fr sides keep the middle cell viewport-centered at the same
+          // width as the files column below it (max-w-2xl = 42rem)
+          className="grid grid-cols-[1fr_minmax(0,42rem)_1fr] items-center gap-3 px-3 pt-3"
           style={{ animation: pageAnimation }}
         >
           <div className="flex items-center gap-2">
@@ -75,7 +84,39 @@ export default function App() {
               About
             </button>
           </div>
-          <ThemeButton />
+          {/* slim version of the empty-state dropzone, same width as the file list */}
+          {page === 'files' && files.length > 0 ? (
+            <button
+              onClick={() => fileInput.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault()
+                setNavDragOver(true)
+              }}
+              onDragLeave={() => setNavDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault()
+                setNavDragOver(false)
+                setFiles(mergeFiles(files, e.dataTransfer.files))
+              }}
+              className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-[1.25rem] border-2 border-dashed px-4 py-2 text-[var(--muted)]"
+              style={{
+                borderColor: navDragOver ? 'var(--accent)' : 'var(--line-strong)',
+                background: navDragOver ? 'var(--accent-gradient)' : 'var(--panel-quiet)',
+              }}
+            >
+              <UploadIcon size={18} />
+              <span className="text-sm font-semibold text-[var(--ink)] min-[560px]:hidden">Add files</span>
+              <span className="hidden text-sm font-semibold text-[var(--ink)] min-[560px]:inline">
+                Tap to add files
+              </span>
+              <span className="hidden text-xs min-[560px]:inline">or drag &amp; drop here</span>
+            </button>
+          ) : (
+            <div />
+          )}
+          <div className="flex justify-end">
+            <ThemeButton />
+          </div>
         </header>
       )}
 
@@ -103,7 +144,16 @@ export default function App() {
         </div>
       </FloatingWindow>
       {profile && (
-        <Main profile={profile} animation={pageAnimation} onEditProfile={() => setEditing(true)} />
+        <Main
+          profile={profile}
+          animation={pageAnimation}
+          onEditProfile={() => setEditing(true)}
+          page={page}
+          setPage={setPage}
+          files={files}
+          setFiles={setFiles}
+          fileInput={fileInput}
+        />
       )}
 
       {/* one floating window for both first-run welcome (alone on the page, no dim)
@@ -145,13 +195,21 @@ function Main({
   profile,
   animation,
   onEditProfile,
+  page,
+  setPage,
+  files,
+  setFiles,
+  fileInput,
 }: {
   profile: Profile
   animation: string
   onEditProfile: () => void
+  page: 'files' | 'share'
+  setPage: (page: 'files' | 'share') => void
+  files: File[]
+  setFiles: (files: File[]) => void
+  fileInput: RefObject<HTMLInputElement | null>
 }) {
-  const [page, setPage] = useState<'files' | 'share'>('files')
-  const [files, setFiles] = useState<File[]>([])
   const room = useShareRoom(profile)
 
   const pickRecipient = (peer: PeerInfo) => {
@@ -171,6 +229,7 @@ function Main({
           onFilesChange={setFiles}
           onShare={() => setPage('share')}
           onEditProfile={onEditProfile}
+          inputRef={fileInput}
         />
       ) : (
         <SharePage
