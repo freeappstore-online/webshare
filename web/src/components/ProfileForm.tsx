@@ -24,6 +24,9 @@ export function ProfileForm({ onSave, initial, saveLabel, title, autoSave, onCan
   const [pfp, setPfp] = useState<string | null>(initial?.pfp ?? null)
   const [pfpError, setPfpError] = useState(false)
   const [saving, setSaving] = useState(false)
+  // flips the title to a thank-you the moment save is clicked, and stays on
+  // through the window's exit animation (it freezes the last open render)
+  const [thanked, setThanked] = useState(false)
   // only nag about an empty name once the user has actually typed in the field
   const [nameTouched, setNameTouched] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -40,8 +43,12 @@ export function ProfileForm({ onSave, initial, saveLabel, title, autoSave, onCan
     const trimmed = name.trim()
     if (!trimmed || saving) return
     setSaving(true)
+    setThanked(true)
     try {
       await onSave({ name: trimmed.slice(0, MAX_NAME), pfp })
+    } catch (err) {
+      setThanked(false)
+      throw err
     } finally {
       setSaving(false)
     }
@@ -67,12 +74,19 @@ export function ProfileForm({ onSave, initial, saveLabel, title, autoSave, onCan
   return (
     <div>
       {title && !autoSave && (
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold tracking-tight text-[var(--ink)]">{title}</h2>
+        // gap-4 matches the window's p-4, so the title never sits closer to
+        // the button than the button sits to the right wall
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="relative text-2xl font-bold tracking-tight text-[var(--ink)]">
+            {/* the real title keeps reserving its space so the window height
+                doesn't jump when the short thank-you swaps in over it */}
+            <span className={thanked ? 'invisible' : undefined}>{title}</span>
+            {thanked && <span className="absolute inset-0">Thanks!</span>}
+          </h2>
           <button
             onClick={submit}
             disabled={saveDisabled}
-            className="flex min-w-18 cursor-pointer items-center justify-center rounded-[var(--radius-sm)] bg-[var(--accent)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40"
+            className="flex min-w-18 shrink-0 cursor-pointer items-center justify-center rounded-[var(--radius-sm)] bg-[var(--accent)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40"
           >
             {saving ? <Spinner size={16} color="#fff" /> : saveLabel}
           </button>

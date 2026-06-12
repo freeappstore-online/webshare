@@ -174,11 +174,13 @@ export default function App() {
         ) : (
           <ProfileForm
             initial={null}
-            title="Welcome!"
+            title="Hi! What should we call you?"
             saveLabel="Continue"
             onSave={async (p) => {
-              await save(p)
+              // flag first: it must land in the same commit as the profile so
+              // the bg transition is already active when the color swaps
               setJustRegistered(true)
+              await save(p)
             }}
           />
         )}
