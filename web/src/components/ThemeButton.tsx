@@ -49,6 +49,8 @@ export function ThemeButton() {
       aria-label={`Theme: ${preference}`}
       title={`Theme: ${preference}`}
       className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-[var(--radius)] border border-[var(--line)] bg-[var(--surface,#fff)] text-[var(--ink)] transition-colors hover:bg-[var(--glass-hover)]"
+      // own view-transition group: the page crossfades, this button snaps
+      style={{ viewTransitionName: 'theme-toggle' }}
     >
       <svg
         width="20"

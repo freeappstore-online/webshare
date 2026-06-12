@@ -230,6 +230,15 @@ body {
   background-color: var(--bg-mid);
 }
 
+/* The theme toggle button opts out of the page crossfade: its old snapshot is
+   dropped immediately so the new icon shows the instant the theme changes. */
+::view-transition-old(theme-toggle) {
+  display: none;
+}
+::view-transition-new(theme-toggle) {
+  animation: none;
+}
+
 /* Theme swaps run inside a View Transition (see lib/themeFade.ts): the whole
    page crossfades as one snapshot, text included. This just sets the pace. */
 ::view-transition-old(root),
