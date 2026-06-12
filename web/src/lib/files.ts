@@ -13,6 +13,16 @@ export function fileKind(file: File): FileKind {
   return 'other'
 }
 
+export const fileKey = (f: File) => `${f.name}:${f.size}`
+
+/** Append incoming files, de-duped by name+size; returns `existing` untouched if nothing new. */
+export function mergeFiles(existing: File[], incoming: FileList | null): File[] {
+  if (!incoming?.length) return existing
+  const seen = new Set(existing.map(fileKey))
+  const fresh = [...incoming].filter((f) => !seen.has(fileKey(f)))
+  return fresh.length ? [...existing, ...fresh] : existing
+}
+
 export function toFileMeta(file: File): FileMeta {
   // keep extension visible when truncating long names
   let n = file.name
