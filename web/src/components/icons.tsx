@@ -24,6 +24,22 @@ function Svg({ size = 20, className, children }: IconProps & { children: React.R
   )
 }
 
+export function CheckIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M5.5 12.5l4.5 5L18.5 5" strokeWidth={3} />
+    </Svg>
+  )
+}
+
+export function ChevronDownIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M6 9l6 6 6-6" strokeWidth={3} />
+    </Svg>
+  )
+}
+
 /** Default profile icon when a user hasn't set a picture (onboarding preview). */
 export function PersonIcon(props: IconProps) {
   return (
@@ -178,6 +194,45 @@ export function EditIcon(props: IconProps) {
     <Svg {...props}>
       <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
       <path d="m15 5 4 4" />
+    </Svg>
+  )
+}
+
+/* file view-mode toggle glyphs */
+export function ViewIconsIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="3" width="7.5" height="7.5" rx="1.5" />
+      <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5" />
+      <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5" />
+      <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" />
+    </Svg>
+  )
+}
+
+export function ViewListIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M8 6h13M8 12h13M8 18h13" />
+      <path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01" />
+    </Svg>
+  )
+}
+
+export function ViewColumnsIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M9.5 3v18M14.5 3v18" />
+    </Svg>
+  )
+}
+
+export function ViewGalleryIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="3" width="18" height="12.5" rx="2" />
+      <path d="M4 20h3.5M10.25 20h3.5M16.5 20h3.5" />
     </Svg>
   )
 }
