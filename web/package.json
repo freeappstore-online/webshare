@@ -10,6 +10,9 @@
   },
   "dependencies": {
     "@freeappstore/sdk": "^0.14.0",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.12.0",
+    "pdfjs-dist": "^6.0.227",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },
