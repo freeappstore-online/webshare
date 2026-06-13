@@ -47,6 +47,7 @@ export default defineConfig({
         background_color: '#ffffff',
         theme_color: '#111111',
         orientation: 'any',
+        // @ts-expect-error valid W3C manifest field, not yet in vite-plugin-pwa types
         min_viewport_width: 320,
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
