@@ -348,7 +348,7 @@ export function WebshareLogo({ alwaysText = false }: { alwaysText?: boolean } = 
           stroke="url(#cloud-gradient)"
         />
       </Svg>
-      <span className={`display-font text-lg font-bold text-[var(--ink)] ${alwaysText ? 'hidden min-[280px]:inline' : 'hidden min-[410px]:inline'}`}>Webshare</span>
+      <span className={`display-font text-lg font-bold text-[var(--ink)] ${alwaysText ? 'inline' : 'hidden min-[410px]:inline'}`}>Webshare</span>
     </div>
   )
 }

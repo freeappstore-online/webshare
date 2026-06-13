@@ -199,7 +199,7 @@ export function ProfileForm({ onSave, initial, saveLabel, title, autoSave, onCan
               FreeAppStore
             </a>
           </p>
-          <WebshareLogo />
+          <WebshareLogo alwaysText />
         </div>
       )}
     </div>
