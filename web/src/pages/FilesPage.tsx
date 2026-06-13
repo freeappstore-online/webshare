@@ -338,7 +338,7 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
               </h2>
               <button
                 onClick={toggleSelectMode}
-                className="cursor-pointer rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] px-2.5 py-1.5 text-xs font-semibold text-[var(--ink)] transition-none hover:bg-[var(--line-strong)]"
+                className="cursor-pointer rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-2 text-sm font-semibold text-[var(--ink)] transition-none hover:bg-[var(--line-strong)] min-[480px]:px-2.5 min-[480px]:py-1.5 min-[480px]:text-xs"
               >
                 {selectMode ? 'Done' : 'Select'}
               </button>
@@ -354,14 +354,14 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
                       setSelected(new Set(files.map(fileKey)))
                     }
                   }}
-                  className="cursor-pointer rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] px-2.5 py-1.5 text-xs font-semibold text-[var(--ink)] transition-none hover:bg-[var(--line-strong)]"
+                  className="cursor-pointer rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-2 text-sm font-semibold text-[var(--ink)] transition-none hover:bg-[var(--line-strong)] min-[480px]:px-2.5 min-[480px]:py-1.5 min-[480px]:text-xs"
                 >
                   {selected.size === files.length ? 'Unselect All' : 'Select All'}
                 </button>
                 <button
                   onClick={removeSelected}
                   disabled={selected.size === 0}
-                  className="cursor-pointer rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] px-2.5 py-1.5 text-xs font-semibold text-[var(--error)] transition-none hover:bg-[var(--line-strong)] disabled:cursor-default disabled:opacity-40"
+                  className="cursor-pointer rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-2 text-sm font-semibold text-[var(--error)] transition-none hover:bg-[var(--line-strong)] disabled:cursor-default disabled:opacity-40 min-[480px]:px-2.5 min-[480px]:py-1.5 min-[480px]:text-xs"
                 >
                   Remove
                 </button>
@@ -394,7 +394,7 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
                 <div className="relative flex rounded-full bg-[var(--page-pill-bg)] p-1">
                   <span
                     aria-hidden="true"
-                    className="absolute bottom-1 top-1 w-9 rounded-full transition-transform duration-200 ease-out"
+                    className="absolute bottom-1 top-1 w-11 rounded-full transition-transform duration-200 ease-out min-[480px]:w-9"
                     style={{
                       background: 'var(--page-pill-active)',
                       boxShadow: '0 1px 4px rgba(0,0,0,0.18)',
@@ -407,7 +407,7 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
                       onClick={() => pickView(key)}
                       aria-label={`${label} view`}
                       title={label}
-                      className={`relative z-10 flex h-7 w-9 cursor-pointer items-center justify-center rounded-full transition-colors duration-200 ${
+                      className={`relative z-10 flex h-9 w-11 cursor-pointer items-center justify-center rounded-full transition-colors duration-200 min-[480px]:h-7 min-[480px]:w-9 ${
                         view === key ? 'text-[var(--ink)]' : 'text-[var(--muted)]'
                       }`}
                     >

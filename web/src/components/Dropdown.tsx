@@ -75,7 +75,7 @@ export function Dropdown<T extends string | number>({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
-        className="flex cursor-pointer items-center gap-1 rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] py-1.5 pl-2 pr-1.5 text-xs font-semibold text-[var(--ink)] transition-none hover:bg-[var(--line-strong)]"
+        className="flex cursor-pointer items-center gap-1 rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] py-2 pl-3 pr-2 text-sm font-semibold text-[var(--ink)] transition-none hover:bg-[var(--line-strong)] min-[480px]:py-1.5 min-[480px]:pl-2 min-[480px]:pr-1.5 min-[480px]:text-xs"
       >
         {trigger ?? options.find((o) => o.value === value)?.label ?? value}
         <span className="text-[var(--muted)]">
@@ -105,7 +105,7 @@ export function Dropdown<T extends string | number>({
                   onChange(option.value)
                   setOpen(false)
                 }}
-                className="flex w-full cursor-pointer items-center gap-0.5 whitespace-nowrap rounded-[0.35rem] py-1 pl-1.5 pr-3 text-left text-xs font-semibold text-[var(--ink)] transition-none hover:bg-[var(--accent)] hover:text-white"
+                className="flex w-full cursor-pointer items-center gap-0.5 whitespace-nowrap rounded-[0.35rem] py-1.5 pl-2 pr-4 text-left text-sm font-semibold text-[var(--ink)] transition-none hover:bg-[var(--accent)] hover:text-white min-[480px]:py-1 min-[480px]:pl-1.5 min-[480px]:pr-3 min-[480px]:text-xs"
               >
                 <span className="w-4 shrink-0">{option.value === value && <CheckIcon size={16} />}</span>
                 {option.label}
