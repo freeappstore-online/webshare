@@ -222,10 +222,11 @@ export function PaperIcon({
 
 /** The page's folded top-right corner; render last so it covers page content. */
 export function PaperFoldCorner() {
+  const filterId = useId()
   return (
     <>
       <defs>
-        <filter id="ws-fold-shadow" x="-80%" y="-80%" width="260%" height="260%">
+        <filter id={filterId} x="-80%" y="-80%" width="260%" height="260%">
           <feGaussianBlur stdDeviation="0.28" />
         </filter>
       </defs>
@@ -234,7 +235,7 @@ export function PaperFoldCorner() {
       <path
         d="M13.5 3Q13.2 6.4 13.08 8.15Q13.05 8.95 13.75 8.92Q16.8 9.1 19 8.5L16.4 6.7z"
         fill="rgba(0, 0, 0, 0.26)"
-        filter="url(#ws-fold-shadow)"
+        filter={`url(#${filterId})`}
       />
       {/* the white fold flap */}
       <path d="M13.5 3v4.5a1 1 0 0 0 1 1H19z" fill="#ffffff" />
