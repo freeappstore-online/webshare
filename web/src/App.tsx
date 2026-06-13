@@ -251,7 +251,7 @@ export default function App() {
       </FloatingWindow>
       <FloatingWindow open={aboutOpen} closeOnBackdrop onClose={() => setAboutOpen(false)}>
         <div className="flex flex-col items-center gap-3 py-2 text-center">
-          <WebshareLogo />
+          <WebshareLogo alwaysText />
           <p className="text-sm text-[var(--muted)]">
             Share files with people on your network — like AirDrop, but in the browser.
           </p>
