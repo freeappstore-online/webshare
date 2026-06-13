@@ -6,7 +6,7 @@ export interface Profile {
 
 export type DeviceKind = 'phone' | 'tablet' | 'laptop' | 'desktop' | 'watch'
 
-export type FileKind = 'image' | 'video' | 'audio' | 'doc' | 'archive' | 'other'
+export type FileKind = 'image' | 'video' | 'audio' | 'doc' | 'archive' | 'folder' | 'other'
 
 /** Compact file metadata sent in share requests. */
 export interface FileMeta {
