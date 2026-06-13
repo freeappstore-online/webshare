@@ -12,6 +12,10 @@ export async function fileThumb(file: File): Promise<string | null> {
     // audio: album art first; containers that overlap with video (3gp, ogg,
     // webm, …) may still hold a video track, so try a frame as a fallback
     if (kind === 'audio') return (await audioArt(file)) ?? (await videoFrame(file))
+    // doc previews are rendered inside the paper icon by docPreview() — skip
+    // imageThumb so iOS Safari's ability to decode PDFs as images doesn't cause
+    // doc files to bypass the paper icon and render as bare <img> elements
+    if (kind === 'doc') return null
     // anything else: see if the browser can actually decode it as an image —
     // trust the decode, not the MIME type or extension
     return await imageThumb(file)
