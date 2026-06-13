@@ -36,6 +36,9 @@ export default function App() {
         setFiles([])
         fileQueue.current = []
         setPage('files')
+        localStorage.removeItem('webshare:view')
+        localStorage.removeItem('webshare:perRow')
+        localStorage.removeItem('webshare:listIconSize')
         setResetting(false)
       })
     }, 400)
