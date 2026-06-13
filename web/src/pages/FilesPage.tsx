@@ -374,7 +374,7 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
                     options={Array.from({ length: 8 }, (_, i) => ({ value: i + 1, label: `${i + 1} per row` }))}
                     onChange={pickPerRow}
                     ariaLabel="Files per row"
-                    trigger={<><span className="min-[350px]:hidden">{perRow}</span><span className="hidden min-[350px]:inline">{perRow} per row</span></>}
+                    trigger={<><span>{perRow}</span><span className="hidden min-[400px]:inline"> per row</span></>}
                   />
                 )}
                 {view === 'list' && (
@@ -387,7 +387,7 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
                     ]}
                     onChange={pickListIconSize}
                     ariaLabel="List icon size"
-                    trigger={<><span className="min-[370px]:hidden">{{ small: 'Small', medium: 'Medium', big: 'Big' }[listIconSize]}</span><span className="hidden min-[370px]:inline">{{ small: 'Small icon', medium: 'Medium icon', big: 'Big icon' }[listIconSize]}</span></>}
+                    trigger={<><span>{{ small: 'Small', medium: 'Medium', big: 'Big' }[listIconSize]}</span><span className="hidden min-[430px]:inline"> icon</span></>}
                   />
                 )}
                 {/* same pill tabs as the edit-profile window: sliding chip behind the active option */}
