@@ -49,7 +49,7 @@ const VIEWS: Array<{ key: ViewMode; label: string; Icon: typeof ViewListIcon }> 
 export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, onEditProfile, onOpenAddPicker, inputRef: input, folderInputRef: folderInput, dragOver }: FilesPageProps) {
   const [view, setView] = useState<ViewMode>(() => {
     const stored = localStorage.getItem(VIEW_KEY)
-    return stored === 'icons' || stored === 'list' ? stored : 'list'
+    return stored === 'icons' || stored === 'list' ? stored : 'icons'
   })
   const [perRow, setPerRow] = useState(() => {
     const n = Number(localStorage.getItem(PER_ROW_KEY))
