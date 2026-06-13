@@ -12,10 +12,10 @@ interface FloatingWindowProps {
 
 /**
  * Centered floating window over a dimmed backdrop. Fades + slides in from the
- * top on open, and reverses out to the top before unmounting on close.
+ * top on open, and reverses out to the top before hiding safely on close.
  */
 export function FloatingWindow({ open, dim = true, closeOnBackdrop = false, onClose, children }: FloatingWindowProps) {
-  // stays mounted while the close animation plays
+  // stays active while the close animation plays
   const [render, setRender] = useState(open)
 
   // freeze the last open-state content & dim during the exit animation, so the
@@ -31,7 +31,8 @@ export function FloatingWindow({ open, dim = true, closeOnBackdrop = false, onCl
     if (open) setRender(true)
   }, [open])
 
-  if (!render) return null
+  // NEVER return null. Unmounting from the DOM is what causes the Safari flash.
+  // We keep it mounted, but hide it visually and disable clicks.
 
   return (
     <div
@@ -39,13 +40,15 @@ export function FloatingWindow({ open, dim = true, closeOnBackdrop = false, onCl
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-[4.5rem]"
       style={{
         background: (open ? dim : lastDim.current) ? 'rgba(0, 0, 0, 0.4)' : 'transparent',
-        // composite the fade on the GPU — repainting a fullscreen dim over the
-        // blurred body blobs tanks the frame rate otherwise
-        willChange: 'opacity',
-        // same duration as the window so the dim never disappears before the card does
+        // Safe hiding without destroying the DOM node
+        visibility: render ? 'visible' : 'hidden',
+        pointerEvents: render ? 'auto' : 'none',
+        // Removed will-change: opacity. Safari optimizes this natively now.
         animation: open
           ? 'ws-fade-in 300ms ease-in-out forwards'
-          : 'ws-fade-out 380ms ease-in-out forwards',
+          : render
+            ? 'ws-fade-out 380ms ease-in-out forwards'
+            : 'none',
       }}
     >
       <div
@@ -56,14 +59,14 @@ export function FloatingWindow({ open, dim = true, closeOnBackdrop = false, onCl
         }}
         className="w-full max-w-sm rounded-[var(--radius)] p-4"
         style={{
-          // elevated surface: near-white in light mode; in dark mode a lifted gray
-          // that's brighter than its border so the card pops off the backdrop
           background: 'var(--float-bg)',
           border: '1px solid var(--float-border)',
           boxShadow: '0 30px 80px rgba(0, 0, 0, 0.45), 0 10px 30px rgba(0, 0, 0, 0.12)',
           animation: open
             ? 'ws-drop-in 300ms ease-in-out forwards'
-            : 'ws-drop-out 380ms ease-in-out forwards',
+            : render
+              ? 'ws-drop-out 380ms ease-in-out forwards'
+              : 'none',
         }}
       >
         {open ? children : lastChildren.current}
