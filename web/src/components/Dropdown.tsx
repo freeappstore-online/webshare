@@ -1,15 +1,23 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { CheckIcon, ChevronDownIcon } from './icons'
 
-interface DropdownProps {
-  value: number
-  options: number[]
-  onChange: (value: number) => void
+interface DropdownProps<T extends string | number> {
+  value: T
+  options: Array<{ value: T; label: ReactNode }>
+  onChange: (value: T) => void
   ariaLabel: string
+  /** custom trigger content (e.g. an icon); defaults to the selected value */
+  trigger?: ReactNode
 }
 
 /** App-styled dropdown: panel-colored trigger, floating listbox below it. */
-export function Dropdown({ value, options, onChange, ariaLabel }: DropdownProps) {
+export function Dropdown<T extends string | number>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  trigger,
+}: DropdownProps<T>) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number; minWidth: number; maxHeight?: number }>()
   const root = useRef<HTMLDivElement>(null)
@@ -69,7 +77,7 @@ export function Dropdown({ value, options, onChange, ariaLabel }: DropdownProps)
         aria-label={ariaLabel}
         className="flex cursor-pointer items-center gap-1 rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] py-1.5 pl-2 pr-1.5 text-xs font-semibold text-[var(--ink)] transition-none hover:bg-[var(--line-strong)]"
       >
-        {value}
+        {trigger ?? options.find((o) => o.value === value)?.label ?? value}
         <span className="text-[var(--muted)]">
           <ChevronDownIcon size={16} />
         </span>
@@ -88,19 +96,19 @@ export function Dropdown({ value, options, onChange, ariaLabel }: DropdownProps)
             ...(pos ?? { visibility: 'hidden' }),
           }}
         >
-          {options.map((n) => (
-            <li key={n}>
+          {options.map((option) => (
+            <li key={option.value}>
               <button
                 role="option"
-                aria-selected={n === value}
+                aria-selected={option.value === value}
                 onClick={() => {
-                  onChange(n)
+                  onChange(option.value)
                   setOpen(false)
                 }}
-                className="flex w-full cursor-pointer items-center gap-0.5 rounded-[0.35rem] py-1 pl-1.5 pr-3 text-left text-xs font-semibold text-[var(--ink)] transition-none hover:bg-[var(--accent)] hover:text-white"
+                className="flex w-full cursor-pointer items-center gap-0.5 whitespace-nowrap rounded-[0.35rem] py-1 pl-1.5 pr-3 text-left text-xs font-semibold text-[var(--ink)] transition-none hover:bg-[var(--accent)] hover:text-white"
               >
-                <span className="w-4 shrink-0">{n === value && <CheckIcon size={16} />}</span>
-                {n}
+                <span className="w-4 shrink-0">{option.value === value && <CheckIcon size={16} />}</span>
+                {option.label}
               </button>
             </li>
           ))}
