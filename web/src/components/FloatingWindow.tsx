@@ -17,6 +17,9 @@ interface FloatingWindowProps {
 export function FloatingWindow({ open, dim = true, closeOnBackdrop = false, onClose, children }: FloatingWindowProps) {
   // stays mounted while the close animation plays
   const [render, setRender] = useState(open)
+  // cleared once the open animation finishes so will-change and animation are
+  // removed — iOS Safari flickers when forwards fill-mode releases the layer
+  const [openDone, setOpenDone] = useState(false)
 
   // freeze the last open-state content & dim during the exit animation, so the
   // window fades away intact even if props change (e.g. welcome → edit)
@@ -28,10 +31,16 @@ export function FloatingWindow({ open, dim = true, closeOnBackdrop = false, onCl
   }
 
   useEffect(() => {
-    if (open) setRender(true)
+    if (open) { setRender(true); setOpenDone(false) }
   }, [open])
 
   if (!render) return null
+
+  const cardAnim = openDone && open
+    ? 'none'
+    : open
+      ? 'ws-drop-in 300ms ease-in-out forwards'
+      : 'ws-drop-out 380ms ease-in-out forwards'
 
   return (
     <div
@@ -51,7 +60,9 @@ export function FloatingWindow({ open, dim = true, closeOnBackdrop = false, onCl
       <div
         onClick={(e) => e.stopPropagation()}
         onAnimationEnd={(e) => {
-          if (e.target === e.currentTarget && !open) setRender(false)
+          if (e.target !== e.currentTarget) return
+          if (!open) setRender(false)
+          else setOpenDone(true)
         }}
         className="w-full max-w-sm rounded-[var(--radius)] p-4"
         style={{
@@ -60,10 +71,8 @@ export function FloatingWindow({ open, dim = true, closeOnBackdrop = false, onCl
           background: 'var(--float-bg)',
           border: '1px solid var(--float-border)',
           boxShadow: '0 30px 80px rgba(0, 0, 0, 0.45), 0 10px 30px rgba(0, 0, 0, 0.12)',
-          willChange: 'transform, opacity',
-          animation: open
-            ? 'ws-drop-in 300ms ease-in-out forwards'
-            : 'ws-drop-out 380ms ease-in-out forwards',
+          willChange: openDone && open ? 'auto' : 'transform, opacity',
+          animation: cardAnim,
         }}
       >
         {open ? children : lastChildren.current}
