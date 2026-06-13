@@ -325,7 +325,7 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
       ) : (
         <>
           {/* min-h matches the pill switcher so swapping to select-mode buttons doesn't change row height */}
-          <div className="flex min-h-9 items-center justify-between px-1">
+          <div className="flex h-11 items-center justify-between px-1 min-[480px]:h-9">
             <div className="flex min-w-0 items-center gap-2.5">
               <h2 className="min-w-0 text-sm font-bold text-[var(--ink)]">
                 <span className="flex flex-col min-[420px]:flex-row min-[420px]:items-baseline min-[420px]:gap-2">
