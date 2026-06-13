@@ -445,7 +445,7 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
                       )}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <div className="ws-list-file-info flex flex-col">
+                      <div className="ws-list-file-info flex min-w-0 flex-col">
                         <p className="select-text truncate text-sm font-semibold text-[var(--ink)]">{f.name}</p>
                       </div>
                     </div>
