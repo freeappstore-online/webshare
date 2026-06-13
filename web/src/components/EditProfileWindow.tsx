@@ -57,7 +57,7 @@ export function EditProfileWindow({ profile, onSave, onReset, onClose }: EditPro
       </div>
 
       {tab === 'profile' ? (
-        <ProfileForm initial={profile} saveLabel="" autoSave onSave={onSave} />
+        <ProfileForm initial={profile} saveLabel="" autoSave autoFocus={false} onSave={onSave} />
       ) : (
         <div className="pt-4">
           <p className="text-sm text-[var(--muted)]">

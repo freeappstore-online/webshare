@@ -15,11 +15,13 @@ interface ProfileFormProps {
   title?: string
   /** No save buttons at all — valid changes are saved automatically (debounced). */
   autoSave?: boolean
+  /** Focus the name input on mount (default true). Pass false to suppress the iOS keyboard pop-up when switching tabs. */
+  autoFocus?: boolean
   onCancel?: () => void
 }
 
 /** Name + optional picture form, shared by first-run onboarding and the edit-profile window. */
-export function ProfileForm({ onSave, initial, saveLabel, title, autoSave, onCancel }: ProfileFormProps) {
+export function ProfileForm({ onSave, initial, saveLabel, title, autoSave, autoFocus = true, onCancel }: ProfileFormProps) {
   const [name, setName] = useState(initial?.name ?? '')
   const [pfp, setPfp] = useState<string | null>(initial?.pfp ?? null)
   const [pfpError, setPfpError] = useState(false)
@@ -145,7 +147,7 @@ export function ProfileForm({ onSave, initial, saveLabel, title, autoSave, onCan
           type="text"
           value={name}
           maxLength={MAX_NAME}
-          autoFocus
+          autoFocus={autoFocus}
           placeholder=" "
           onChange={(e) => {
             setName(e.target.value)
