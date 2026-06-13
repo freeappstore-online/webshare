@@ -472,7 +472,7 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
                         <span className="flex h-full w-full items-center justify-center text-[var(--accent)]">
                           <FolderIcon className="h-full w-full" />
                         </span>
-                      ) : thumbs.get(fileKey(f)) && fileKind(f) !== 'audio' ? (
+                      ) : thumbs.get(fileKey(f)) && fileKind(f) !== 'audio' && fileKind(f) !== 'doc' ? (
                         <img
                           src={thumbs.get(fileKey(f))!}
                           alt=""
