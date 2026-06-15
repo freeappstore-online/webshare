@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { CheckIcon, ChevronDownIcon } from './icons'
 
 interface DropdownProps<T extends string | number> {
@@ -26,7 +27,7 @@ export function Dropdown<T extends string | number>({
   useLayoutEffect(() => {
     if (!open) return
     const onPointerDown = (e: PointerEvent) => {
-      if (!root.current?.contains(e.target as Node)) setOpen(false)
+      if (!root.current?.contains(e.target as Node) && !list.current?.contains(e.target as Node)) setOpen(false)
     }
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false)
@@ -75,19 +76,19 @@ export function Dropdown<T extends string | number>({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
-        className="flex cursor-pointer items-center gap-1 rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] py-2 pl-3 pr-2 text-sm font-semibold text-[var(--ink)] transition-none hover:bg-[var(--line-strong)] min-[480px]:py-1.5 min-[480px]:pl-2 min-[480px]:pr-1.5 min-[480px]:text-xs"
+        className="flex cursor-pointer items-center gap-1 rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] py-2 pl-3 pr-2 text-sm font-semibold text-[var(--ink)] transition-none hover:bg-[var(--line-strong)]"
       >
         {trigger ?? options.find((o) => o.value === value)?.label ?? value}
         <span className="text-[var(--muted)]">
           <ChevronDownIcon size={16} />
         </span>
       </button>
-      {open && (
+      {open && createPortal(
         <ul
           ref={list}
           role="listbox"
           aria-label={ariaLabel}
-          className="fixed z-20 overflow-y-auto rounded-[var(--radius-sm)] p-1"
+          className="fixed z-[200] overflow-y-auto rounded-[var(--radius-sm)] p-1"
           style={{
             // same elevated surface as the floating windows, with quieter edges
             background: 'var(--float-bg)',
@@ -105,14 +106,15 @@ export function Dropdown<T extends string | number>({
                   onChange(option.value)
                   setOpen(false)
                 }}
-                className="flex w-full cursor-pointer items-center gap-0.5 whitespace-nowrap rounded-[0.35rem] py-1.5 pl-2 pr-4 text-left text-sm font-semibold text-[var(--ink)] transition-none hover:bg-[var(--accent)] hover:text-white min-[480px]:py-1 min-[480px]:pl-1.5 min-[480px]:pr-3 min-[480px]:text-xs"
+                className="flex w-full cursor-pointer items-center gap-0.5 whitespace-nowrap rounded-[0.35rem] py-1.5 pl-2 pr-4 text-left text-sm font-semibold text-[var(--ink)] transition-none hover:bg-[var(--accent)] hover:text-white"
               >
                 <span className="w-4 shrink-0">{option.value === value && <CheckIcon size={16} />}</span>
                 {option.label}
               </button>
             </li>
           ))}
-        </ul>
+        </ul>,
+        document.body
       )}
     </div>
   )
