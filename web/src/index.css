@@ -18,6 +18,9 @@
   --glass: rgba(255, 255, 255, 0.7);
   --glass-hover: rgba(255, 255, 255, 0.85);
   --glass-strong: rgba(255, 255, 255, 0.88);
+  --secondary-btn-bg: var(--panel-strong);
+  --secondary-btn-border: var(--line);
+  --secondary-btn-text: var(--muted);
   --accent: #007AFF;
   --accent-soft: #cce4ff;
   --accent-deep: #0055b3;
@@ -91,6 +94,9 @@
   --glass: rgba(48, 48, 48, 0.8);
   --glass-hover: rgba(60, 60, 60, 0.9);
   --glass-strong: rgba(38, 38, 38, 0.9);
+  --secondary-btn-bg: rgba(72, 72, 72, 0.9);
+  --secondary-btn-border: rgba(255, 255, 255, 0.18);
+  --secondary-btn-text: #ffffff;
   --accent: #0A84FF;
   --accent-soft: #0e2a4a;
   --accent-deep: #9ccaff;
