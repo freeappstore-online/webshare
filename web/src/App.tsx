@@ -18,9 +18,6 @@ import type { PeerInfo, Profile } from './types'
 
 type ViewMode = 'icons' | 'list'
 type ListIconSize = 'small' | 'medium' | 'big'
-const VIEW_KEY = 'webshare:view'
-const PER_ROW_KEY = 'webshare:perRow'
-const LIST_ICON_SIZE_KEY = 'webshare:listIconSize'
 const SHARE_VIEW_KEY = 'webshare:share:view'
 const SHARE_PER_ROW_KEY = 'webshare:share:perRow'
 const SHARE_LIST_ICON_KEY = 'webshare:share:listIconSize'
@@ -60,9 +57,6 @@ export default function App() {
         setFiles([])
         fileQueue.current = []
         setPage('files')
-        setView('icons')
-        setPerRow(3)
-        setListIconSize('medium')
         localStorage.removeItem('webshare:view')
         localStorage.removeItem('webshare:perRow')
         localStorage.removeItem('webshare:listIconSize')
@@ -84,22 +78,6 @@ export default function App() {
   // staged files live here so the nav bar can host the add-files button;
   // the hidden file input itself renders inside FilesPage
   const [page, setPage] = useState<'files' | 'share'>('files')
-
-  const [view, setView] = useState<ViewMode>(() => {
-    const stored = localStorage.getItem(VIEW_KEY)
-    return stored === 'icons' || stored === 'list' ? stored : 'icons'
-  })
-  const [perRow, setPerRow] = useState(() => {
-    const n = Number(localStorage.getItem(PER_ROW_KEY))
-    return Number.isInteger(n) && n >= 1 && n <= 8 ? n : 3
-  })
-  const [listIconSize, setListIconSize] = useState<ListIconSize>(() => {
-    const s = localStorage.getItem(LIST_ICON_SIZE_KEY)
-    return s === 'small' || s === 'medium' || s === 'big' ? s : 'medium'
-  })
-  const pickView = (mode: ViewMode) => { setView(mode); localStorage.setItem(VIEW_KEY, mode) }
-  const pickPerRow = (n: number) => { setPerRow(n); localStorage.setItem(PER_ROW_KEY, String(n)) }
-  const pickListIconSize = (s: ListIconSize) => { setListIconSize(s); localStorage.setItem(LIST_ICON_SIZE_KEY, s) }
 
   const [shareView, setShareView] = useState<ViewMode>(() => {
     const s = localStorage.getItem(SHARE_VIEW_KEY)
