@@ -4,7 +4,7 @@ import { PeerAvatar } from '../components/PeerAvatar'
 import { ViewIconsIcon, ViewListIcon } from '../components/icons'
 import { DEVICE_LABEL } from '../lib/device'
 import type { SignalState } from '../lib/signal'
-import type { DeviceKind, OutgoingRequest, PeerInfo, Profile } from '../types'
+import type { OutgoingRequest, PeerInfo, Profile } from '../types'
 
 type ViewMode = 'icons' | 'list'
 type ListIconSize = 'small' | 'medium' | 'big'

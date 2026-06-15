@@ -418,12 +418,6 @@ export default function App() {
           fileInput={fileInput}
           folderInput={folderInput}
           dragOver={dragOver}
-          view={view}
-          perRow={perRow}
-          listIconSize={listIconSize}
-          onViewChange={pickView}
-          onPerRowChange={pickPerRow}
-          onListIconSizeChange={pickListIconSize}
           shareView={shareView}
           sharePerRow={sharePerRow}
           shareListIconSize={shareListIconSize}
@@ -483,12 +477,6 @@ function Main({
   fileInput,
   folderInput,
   dragOver,
-  view,
-  perRow,
-  listIconSize,
-  onViewChange,
-  onPerRowChange,
-  onListIconSizeChange,
   shareView,
   sharePerRow,
   shareListIconSize,
@@ -508,12 +496,6 @@ function Main({
   fileInput: RefObject<HTMLInputElement | null>
   folderInput: RefObject<HTMLInputElement | null>
   dragOver: boolean
-  view: ViewMode
-  perRow: number
-  listIconSize: ListIconSize
-  onViewChange: (mode: ViewMode) => void
-  onPerRowChange: (n: number) => void
-  onListIconSizeChange: (s: ListIconSize) => void
   shareView: ViewMode
   sharePerRow: number
   shareListIconSize: ListIconSize
