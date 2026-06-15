@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { Dropdown } from '../components/Dropdown'
+import { FinderFileName, ListFileName } from '../components/FileNames'
 import {
   AudioSquareIcon,
   CheckIcon,
@@ -325,7 +326,7 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
       ) : (
         <>
           {/* min-h matches the pill switcher so swapping to select-mode buttons doesn't change row height */}
-          <div className="flex h-11 items-center justify-between px-1 min-[480px]:h-9">
+          <div className="flex h-11 items-center justify-between px-1">
             <div className="flex min-w-0 items-center gap-2.5">
               <h2 className="min-w-0 text-sm font-bold text-[var(--ink)]">
                 <span className="flex flex-col min-[420px]:flex-row min-[420px]:items-baseline min-[420px]:gap-2">
@@ -338,7 +339,7 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
               </h2>
               <button
                 onClick={toggleSelectMode}
-                className="cursor-pointer rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-2 text-sm font-semibold text-[var(--ink)] transition-none hover:bg-[var(--line-strong)] min-[480px]:px-2.5 min-[480px]:py-1.5 min-[480px]:text-xs"
+                className="cursor-pointer rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-2 text-sm font-semibold text-[var(--ink)] transition-none hover:bg-[var(--line-strong)]"
               >
                 {selectMode ? 'Done' : 'Select'}
               </button>
@@ -354,14 +355,14 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
                       setSelected(new Set(files.map(fileKey)))
                     }
                   }}
-                  className="cursor-pointer rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-2 text-sm font-semibold text-[var(--ink)] transition-none hover:bg-[var(--line-strong)] min-[480px]:px-2.5 min-[480px]:py-1.5 min-[480px]:text-xs"
+                  className="cursor-pointer rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-2 text-sm font-semibold text-[var(--ink)] transition-none hover:bg-[var(--line-strong)]"
                 >
                   {selected.size === files.length ? 'Unselect All' : 'Select All'}
                 </button>
                 <button
                   onClick={removeSelected}
                   disabled={selected.size === 0}
-                  className="cursor-pointer rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-2 text-sm font-semibold text-[var(--error)] transition-none hover:bg-[var(--line-strong)] disabled:cursor-default disabled:opacity-40 min-[480px]:px-2.5 min-[480px]:py-1.5 min-[480px]:text-xs"
+                  className="cursor-pointer rounded-[0.4rem] border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-2 text-sm font-semibold text-[var(--error)] transition-none hover:bg-[var(--line-strong)] disabled:cursor-default disabled:opacity-40"
                 >
                   Remove
                 </button>
@@ -394,7 +395,7 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
                 <div className="relative flex rounded-full bg-[var(--page-pill-bg)] p-1">
                   <span
                     aria-hidden="true"
-                    className="absolute bottom-1 top-1 w-11 rounded-full transition-transform duration-200 ease-out min-[480px]:w-9"
+                    className="absolute bottom-1 top-1 w-11 rounded-full transition-transform duration-200 ease-out"
                     style={{
                       background: 'var(--page-pill-active)',
                       boxShadow: '0 1px 4px rgba(0,0,0,0.18)',
@@ -407,7 +408,7 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
                       onClick={() => pickView(key)}
                       aria-label={`${label} view`}
                       title={label}
-                      className={`relative z-10 flex h-9 w-11 cursor-pointer items-center justify-center rounded-full transition-colors duration-200 min-[480px]:h-7 min-[480px]:w-9 ${
+                      className={`relative z-10 flex h-9 w-11 cursor-pointer items-center justify-center rounded-full transition-colors duration-200 ${
                         view === key ? 'text-[var(--ink)]' : 'text-[var(--muted)]'
                       }`}
                     >
@@ -525,20 +526,18 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
       </div>
 
       {files.length > 0 && (
-        <div
-          className="sticky bottom-0 -mx-4 px-4 min-[680px]:grid min-[680px]:grid-cols-[minmax(16rem,1fr)_minmax(0,42rem)_minmax(0,1fr)] min-[680px]:gap-0"
-        >
+        <div className="sticky bottom-0 -mx-4 px-4 min-[680px]:grid min-[680px]:grid-cols-[minmax(16rem,1fr)_minmax(0,42rem)_minmax(0,1fr)] min-[680px]:gap-0">
           <div className="hidden min-[680px]:block" />
-          <div className="relative mx-auto w-full max-w-2xl bg-[var(--bg-end)]">
+          <div className="relative mx-auto w-full max-w-2xl">
             <div className="pointer-events-none absolute bottom-full left-0 right-0 h-4" style={{ background: 'linear-gradient(to bottom, transparent, var(--bg-end))' }} />
-            <button
-              onClick={onShare}
-              className="flex w-full cursor-pointer items-center justify-center rounded-full bg-[var(--accent)] py-2 font-bold text-white"
-            >
-              {selectMode && selected.size > 0
-                ? `Share ${selected.size} selected item${selected.size === 1 ? '' : 's'}`
-                : `Share ${files.length} item${files.length === 1 ? '' : 's'}`}
-            </button>
+              <button
+                onClick={onShare}
+                className="relative z-10 flex w-full cursor-pointer items-center justify-center rounded-full bg-[var(--accent)] py-2 font-bold text-white shadow-sm"
+              >
+                {selectMode && selected.size > 0
+                  ? `Share ${selected.size} selected item${selected.size === 1 ? '' : 's'}`
+                  : `Share ${files.length} item${files.length === 1 ? '' : 's'}`}
+              </button>
           </div>
           <div className="hidden min-[680px]:block" />
         </div>
@@ -547,123 +546,3 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
   )
 }
 
-// shared canvas for text measurement (cheap, no DOM thrash)
-let measureCanvas: CanvasRenderingContext2D | null = null
-function getMeasureCtx(font: string): CanvasRenderingContext2D {
-  if (!measureCanvas) measureCanvas = document.createElement('canvas').getContext('2d')!
-  measureCanvas.font = font
-  return measureCanvas
-}
-
-/**
- * Finder-style file label: wraps to at most two lines based on the tile's
- * actual width. When the name is too long, the second line is middle-ellipsized
- * so the ending (extension + last characters) stays visible, e.g.
- * "aaaaaaaaaaaaaaaaaaaa…" / "aaaaaa…456.pdf".
- */
-function FinderFileName({ name }: { name: string }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [lines, setLines] = useState<[string, string]>([name, ''])
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-
-    const compute = () => {
-      const width = el.clientWidth - 1
-      if (width <= 0) return
-      const style = getComputedStyle(el)
-      const ctx = getMeasureCtx(`${style.fontWeight} ${style.fontSize} ${style.fontFamily}`)
-      const fits = (s: string) => ctx.measureText(s).width <= width
-
-      if (fits(name)) {
-        setLines([name, ''])
-        return
-      }
-      // line 1: the longest prefix that fits the tile width
-      let lo = 0
-      let hi = name.length
-      while (lo < hi) {
-        const mid = Math.ceil((lo + hi) / 2)
-        if (fits(name.slice(0, mid))) lo = mid
-        else hi = mid - 1
-      }
-      const line1 = name.slice(0, lo)
-      const rest = name.slice(lo)
-      if (fits(rest)) {
-        setLines([line1, rest])
-        return
-      }
-      // line 2: middle-ellipsize, keeping 4 chars + extension visible
-      const dot = name.lastIndexOf('.')
-      const ext = dot > 0 && name.length - dot <= 8 ? name.slice(dot) : ''
-      const tailLen = Math.min(4 + ext.length, rest.length - 1)
-      const tail = rest.slice(-tailLen)
-      let lo2 = 0
-      let hi2 = rest.length - tailLen
-      const fits2 = (n: number) => fits(rest.slice(0, n) + '…' + tail)
-      while (lo2 < hi2) {
-        const mid = Math.ceil((lo2 + hi2) / 2)
-        if (fits2(mid)) lo2 = mid
-        else hi2 = mid - 1
-      }
-      setLines([line1, rest.slice(0, lo2) + '…' + tail])
-    }
-
-    compute()
-    const ro = new ResizeObserver(compute)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [name])
-
-  return (
-    <div
-      ref={ref}
-      className="select-text w-full text-center text-xs font-semibold leading-tight text-[var(--ink)]"
-      title={name}
-    >
-      <div className="overflow-hidden whitespace-nowrap">{lines[0]}</div>
-      {lines[1] && <div className="overflow-hidden whitespace-nowrap">{lines[1]}</div>}
-    </div>
-  )
-}
-
-/** List-view filename: single line, middle-ellipsized keeping the tail visible. */
-function ListFileName({ name }: { name: string }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [display, setDisplay] = useState(name)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const compute = () => {
-      const width = el.clientWidth - 1
-      if (width <= 0) return
-      const style = getComputedStyle(el)
-      const ctx = getMeasureCtx(`${style.fontWeight} ${style.fontSize} ${style.fontFamily}`)
-      const fits = (s: string) => ctx.measureText(s).width <= width
-      if (fits(name)) { setDisplay(name); return }
-      const dot = name.lastIndexOf('.')
-      const ext = dot > 0 && name.length - dot <= 8 ? name.slice(dot) : ''
-      const tailLen = Math.min(4 + ext.length, name.length - 1)
-      const tail = name.slice(-tailLen)
-      let lo = 0, hi = name.length - tailLen
-      while (lo < hi) {
-        const mid = Math.ceil((lo + hi) / 2)
-        if (fits(name.slice(0, mid) + '…' + tail)) lo = mid
-        else hi = mid - 1
-      }
-      setDisplay(name.slice(0, lo) + '…' + tail)
-    }
-    compute()
-    const ro = new ResizeObserver(compute)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [name])
-
-  return (
-    <div ref={ref} className="select-text w-full text-sm font-semibold text-[var(--ink)]" title={name}>
-      <div className="overflow-hidden whitespace-nowrap">{display}</div>
-    </div>
-  )
-}
