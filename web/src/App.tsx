@@ -5,7 +5,8 @@ import { ThemeButton } from './components/ThemeButton'
 import { EditProfileWindow } from './components/EditProfileWindow'
 import { FloatingWindow } from './components/FloatingWindow'
 import { IncomingShare } from './components/IncomingShare'
-import { CloseIcon, FolderToFilesIcon, TriangleInfoIcon, UploadIcon, WebshareLogo } from './components/icons'
+import { Dropdown } from './components/Dropdown'
+import { CloseIcon, FolderToFilesIcon, TriangleInfoIcon, UploadIcon, ViewIconsIcon, ViewListIcon, WebshareLogo } from './components/icons'
 import { ProfileForm } from './components/ProfileForm'
 import { useProfile } from './hooks/useProfile'
 import { withThemeFade } from './lib/themeFade'
@@ -14,6 +15,29 @@ import { mergeFiles, readEntry, toFileMeta } from './lib/files'
 import { FilesPage } from './pages/FilesPage'
 import { SharePage } from './pages/SharePage'
 import type { PeerInfo, Profile } from './types'
+
+type ViewMode = 'icons' | 'list'
+type ListIconSize = 'small' | 'medium' | 'big'
+const VIEW_KEY = 'webshare:view'
+const PER_ROW_KEY = 'webshare:perRow'
+const LIST_ICON_SIZE_KEY = 'webshare:listIconSize'
+const SHARE_VIEW_KEY = 'webshare:share:view'
+const SHARE_PER_ROW_KEY = 'webshare:share:perRow'
+const SHARE_LIST_ICON_KEY = 'webshare:share:listIconSize'
+
+function getDefaultSharePerRow(width: number): number {
+  if (width < 460) return 3
+  if (width < 600) return 4
+  if (width < 680) return 5
+  if (width < 780) return 3
+  if (width < 960) return 4
+  return 5
+}
+
+const SHARE_VIEWS = [
+  { key: 'icons' as const, label: 'Icons', Icon: ViewIconsIcon },
+  { key: 'list' as const, label: 'List', Icon: ViewListIcon },
+]
 
 export default function App() {
   const { profile, save, reset } = useProfile()
@@ -36,9 +60,18 @@ export default function App() {
         setFiles([])
         fileQueue.current = []
         setPage('files')
+        setView('icons')
+        setPerRow(3)
+        setListIconSize('medium')
         localStorage.removeItem('webshare:view')
         localStorage.removeItem('webshare:perRow')
         localStorage.removeItem('webshare:listIconSize')
+        setShareView('icons')
+        setSharePerRowUser(null)
+        setShareListIconSize('medium')
+        localStorage.removeItem(SHARE_VIEW_KEY)
+        localStorage.removeItem(SHARE_PER_ROW_KEY)
+        localStorage.removeItem(SHARE_LIST_ICON_KEY)
         setResetting(false)
       })
     }, 400)
@@ -51,11 +84,51 @@ export default function App() {
   // staged files live here so the nav bar can host the add-files button;
   // the hidden file input itself renders inside FilesPage
   const [page, setPage] = useState<'files' | 'share'>('files')
+
+  const [view, setView] = useState<ViewMode>(() => {
+    const stored = localStorage.getItem(VIEW_KEY)
+    return stored === 'icons' || stored === 'list' ? stored : 'icons'
+  })
+  const [perRow, setPerRow] = useState(() => {
+    const n = Number(localStorage.getItem(PER_ROW_KEY))
+    return Number.isInteger(n) && n >= 1 && n <= 8 ? n : 3
+  })
+  const [listIconSize, setListIconSize] = useState<ListIconSize>(() => {
+    const s = localStorage.getItem(LIST_ICON_SIZE_KEY)
+    return s === 'small' || s === 'medium' || s === 'big' ? s : 'medium'
+  })
+  const pickView = (mode: ViewMode) => { setView(mode); localStorage.setItem(VIEW_KEY, mode) }
+  const pickPerRow = (n: number) => { setPerRow(n); localStorage.setItem(PER_ROW_KEY, String(n)) }
+  const pickListIconSize = (s: ListIconSize) => { setListIconSize(s); localStorage.setItem(LIST_ICON_SIZE_KEY, s) }
+
+  const [shareView, setShareView] = useState<ViewMode>(() => {
+    const s = localStorage.getItem(SHARE_VIEW_KEY)
+    return s === 'icons' || s === 'list' ? s : 'icons'
+  })
+  const [sharePerRowUser, setSharePerRowUser] = useState<number | null>(() => {
+    const n = Number(localStorage.getItem(SHARE_PER_ROW_KEY))
+    return Number.isInteger(n) && n >= 1 && n <= 8 ? n : null
+  })
+  const [sharePerRowViewport, setSharePerRowViewport] = useState(() => getDefaultSharePerRow(window.innerWidth))
+  const [shareListIconSize, setShareListIconSize] = useState<ListIconSize>(() => {
+    const s = localStorage.getItem(SHARE_LIST_ICON_KEY)
+    return s === 'small' || s === 'medium' || s === 'big' ? s : 'medium'
+  })
+  const sharePerRow = sharePerRowUser ?? sharePerRowViewport
+  const pickShareView = (mode: ViewMode) => { setShareView(mode); localStorage.setItem(SHARE_VIEW_KEY, mode) }
+  const pickSharePerRow = (n: number) => { setSharePerRowUser(n); localStorage.setItem(SHARE_PER_ROW_KEY, String(n)) }
+  const pickShareListIconSize = (s: ListIconSize) => { setShareListIconSize(s); localStorage.setItem(SHARE_LIST_ICON_KEY, s) }
+
   const [files, setFiles] = useState<File[]>([])
   const [dragOver, setDragOver] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const folderInput = useRef<HTMLInputElement>(null)
   useEffect(() => { setAddPickerOpen(false) }, [files.length])
+  useEffect(() => {
+    const onResize = () => setSharePerRowViewport(getDefaultSharePerRow(window.innerWidth))
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   // A continuous queue so dropping giant folders doesn't lock the thread.
   // Pushes happen instantly; rendering yields to the browser every 150 files.
@@ -174,17 +247,13 @@ export default function App() {
           !profile || resetting || justRegistered ? 'background-color 380ms ease-in-out' : 'none',
       }}
     >
-      {/* no nav bar — logo top-left, theme toggle top-right; hidden until first-run setup is done */}
       {profile && (
         <header
-          // the middle cell mirrors the files column below it: same 42rem cap,
-          // and at md+ the 16rem sides equal the page's profile column (14rem)
-          // + gap (2rem), so button and list edges line up at every width
           className="grid grid-cols-[1fr_minmax(0,42rem)_1fr] items-center gap-3 px-3 pt-3 min-[680px]:grid-cols-[minmax(16rem,1fr)_minmax(0,42rem)_minmax(3rem,1fr)] min-[680px]:gap-0 min-[680px]:px-4"
           style={{ animation: pageAnimation }}
         >
           <div className="flex items-center gap-2">
-            <WebshareLogo alwaysText={files.length === 0} />
+            <WebshareLogo alwaysText={files.length === 0 || page === 'share'} />
             <button
               onClick={() => setAboutOpen(true)}
               className="cursor-pointer rounded-[var(--radius-sm)] px-2.5 py-1.5 text-sm font-semibold text-[var(--muted)] transition-colors hover:bg-[var(--line-strong)] hover:text-[var(--ink)]"
@@ -192,8 +261,70 @@ export default function App() {
               About
             </button>
           </div>
-          {/* slim version of the empty-state dropzone, same width as the file list */}
-          {page === 'files' && files.length > 0 ? (
+
+          {page === 'share' && files.length > 0 ? (
+            <div className="hidden min-[680px]:flex w-full min-w-0 items-center gap-2">
+              <p className="flex-1 min-w-0 truncate text-sm font-bold text-[var(--ink)]">
+                {shareView === 'icons' ? (
+                  <>
+                    <span className="min-[720px]:hidden">Tap to send {files.length} item{files.length !== 1 ? 's' : ''}</span>
+                    <span className="hidden min-[720px]:inline">Tap people to send {files.length} item{files.length !== 1 ? 's' : ''}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="min-[750px]:hidden">Tap to send {files.length} item{files.length !== 1 ? 's' : ''}</span>
+                    <span className="hidden min-[750px]:inline">Tap people to send {files.length} item{files.length !== 1 ? 's' : ''}</span>
+                  </>
+                )}
+              </p>
+              {shareView === 'icons' && (
+                <Dropdown
+                  value={sharePerRow}
+                  options={Array.from({ length: 8 }, (_, i) => ({ value: i + 1, label: `${i + 1} per row` }))}
+                  onChange={pickSharePerRow}
+                  ariaLabel="Recipients per row"
+                  trigger={<><span>{sharePerRow}</span><span className="hidden min-[400px]:inline"> per row</span></>}
+                />
+              )}
+              {shareView === 'list' && (
+                <Dropdown
+                  value={shareListIconSize}
+                  options={[
+                    { value: 'small' as const, label: 'Small icon' },
+                    { value: 'medium' as const, label: 'Medium icon' },
+                    { value: 'big' as const, label: 'Big icon' },
+                  ]}
+                  onChange={pickShareListIconSize}
+                  ariaLabel="Avatar size"
+                  trigger={<><span>{{ small: 'Small', medium: 'Medium', big: 'Big' }[shareListIconSize]}</span><span className="hidden min-[430px]:inline"> icon</span></>}
+                />
+              )}
+              <div className="relative flex shrink-0 rounded-full bg-[var(--page-pill-bg)] p-1">
+                <span
+                  aria-hidden="true"
+                  className="absolute bottom-1 top-1 w-11 rounded-full transition-transform duration-200 ease-out"
+                  style={{
+                    background: 'var(--page-pill-active)',
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.18)',
+                    transform: `translateX(${SHARE_VIEWS.findIndex((v) => v.key === shareView) * 100}%)`,
+                  }}
+                />
+                {SHARE_VIEWS.map(({ key, label, Icon }) => (
+                  <button
+                    key={key}
+                    onClick={() => pickShareView(key)}
+                    aria-label={`${label} view`}
+                    title={label}
+                    className={`relative z-10 flex h-9 w-11 cursor-pointer items-center justify-center rounded-full transition-colors duration-200 ${
+                      shareView === key ? 'text-[var(--ink)]' : 'text-[var(--muted)]'
+                    }`}
+                  >
+                    <Icon size={15} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : page === 'files' && files.length > 0 ? (
             <button
               onClick={() => setAddPickerOpen(true)}
               className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-[1.25rem] border-2 border-dashed px-4 py-2 text-[var(--muted)] transition-none"
@@ -210,7 +341,8 @@ export default function App() {
           ) : (
             <div />
           )}
-          <div className="flex justify-end">
+
+          <div className="col-start-3 flex justify-end">
             <ThemeButton />
           </div>
         </header>
@@ -286,6 +418,18 @@ export default function App() {
           fileInput={fileInput}
           folderInput={folderInput}
           dragOver={dragOver}
+          view={view}
+          perRow={perRow}
+          listIconSize={listIconSize}
+          onViewChange={pickView}
+          onPerRowChange={pickPerRow}
+          onListIconSizeChange={pickListIconSize}
+          shareView={shareView}
+          sharePerRow={sharePerRow}
+          shareListIconSize={shareListIconSize}
+          onShareViewChange={pickShareView}
+          onSharePerRowChange={pickSharePerRow}
+          onShareListIconSizeChange={pickShareListIconSize}
         />
       )}
 
@@ -339,6 +483,18 @@ function Main({
   fileInput,
   folderInput,
   dragOver,
+  view,
+  perRow,
+  listIconSize,
+  onViewChange,
+  onPerRowChange,
+  onListIconSizeChange,
+  shareView,
+  sharePerRow,
+  shareListIconSize,
+  onShareViewChange,
+  onSharePerRowChange,
+  onShareListIconSizeChange,
 }: {
   profile: Profile
   animation: string
@@ -352,6 +508,18 @@ function Main({
   fileInput: RefObject<HTMLInputElement | null>
   folderInput: RefObject<HTMLInputElement | null>
   dragOver: boolean
+  view: ViewMode
+  perRow: number
+  listIconSize: ListIconSize
+  onViewChange: (mode: ViewMode) => void
+  onPerRowChange: (n: number) => void
+  onListIconSizeChange: (s: ListIconSize) => void
+  shareView: ViewMode
+  sharePerRow: number
+  shareListIconSize: ListIconSize
+  onShareViewChange: (mode: ViewMode) => void
+  onSharePerRowChange: (n: number) => void
+  onShareListIconSizeChange: (s: ListIconSize) => void
 }) {
   const room = useShareRoom(profile)
 
@@ -380,7 +548,14 @@ function Main({
         />
       ) : (
         <SharePage
+          profile={profile}
           fileCount={files.length}
+          view={shareView}
+          perRow={sharePerRow}
+          listIconSize={shareListIconSize}
+          onViewChange={onShareViewChange}
+          onPerRowChange={onSharePerRowChange}
+          onListIconSizeChange={onShareListIconSizeChange}
           peers={room.peers}
           connection={room.connection}
           outgoing={room.outgoing}
