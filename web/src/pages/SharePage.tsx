@@ -159,7 +159,7 @@ export function SharePage({
             <div className="flex items-center justify-center py-8">
               <EmptyState
                 title="No one's here yet"
-                message="Ask the other person to open Webshare on the same Wi-Fi — they'll show up here. No sign-up needed."
+                message="Ask the other person to open Webshare on the same Wi-Fi and switch discoverable on — they'll show up here. No sign-up needed."
               />
             </div>
           )}
@@ -242,7 +242,7 @@ export function SharePage({
         <div className="hidden min-[680px]:block" />
         <div className="mx-auto w-full max-w-2xl">
           <p className="relative z-10 mb-0.5 text-center text-xs text-[var(--muted)]">
-            Empty list? Ensure you're both on the same Wi-Fi
+            Not here? Check if they are on your Wi-Fi and discoverable
           </p>
           <div className="relative">
             <div className="pointer-events-none absolute bottom-full left-0 right-0 h-4" style={{ background: 'linear-gradient(to bottom, transparent, var(--bg-end))' }} />

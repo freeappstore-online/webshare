@@ -324,16 +324,15 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
       )}
 
       {!hasFiles && (
-        <div className="mt-5 flex flex-col items-center">
-          <button
+        <button
             role="switch"
             aria-checked={discoverable}
             onClick={() => onDiscoverableChange(!discoverable)}
-            className="flex w-full max-w-[220px] cursor-pointer items-center justify-between gap-3"
+            className="mt-5 flex w-full cursor-pointer items-center justify-between gap-3 rounded-[1.25rem] bg-[var(--paper)] px-4 py-3"
           >
-            <div className="flex h-10 flex-col items-start justify-center">
+            <div className="flex flex-col items-start gap-0.5">
               <span className="text-sm font-semibold text-[var(--ink)]">Discoverable to senders</span>
-              <span className={`text-xs text-[var(--muted)] ${discoverable ? 'hidden' : ''}`}>Enable to let senders see you</span>
+              <span className="text-xs text-[var(--muted)]">Let senders on the same Wi-Fi see you</span>
             </div>
             <span
               className={`relative inline-flex h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
@@ -347,7 +346,6 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
               />
             </span>
           </button>
-        </div>
       )}
 
       {files.length === 0 ? (
