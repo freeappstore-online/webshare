@@ -1,4 +1,5 @@
-import { EmptyState, Spinner } from '@freeappstore/sdk/ui'
+import { useEffect } from 'react'
+import { EmptyState } from '@freeappstore/sdk/ui'
 import { Dropdown } from '../components/Dropdown'
 import { PeerAvatar } from '../components/PeerAvatar'
 import { ViewIconsIcon, ViewListIcon } from '../components/icons'
@@ -49,6 +50,13 @@ export function SharePage({
   onBack,
 }: SharePageProps) {
   const allPeers = peers
+
+  useEffect(() => {
+    if (outgoing?.status === 'accepted' || outgoing?.status === 'declined') {
+      const t = setTimeout(onClearOutgoing, 2000)
+      return () => clearTimeout(t)
+    }
+  }, [outgoing?.status, onClearOutgoing])
 
   return (
     <div className="mx-auto flex min-h-0 w-full flex-1 flex-col p-4">
@@ -163,12 +171,16 @@ export function SharePage({
                     disabled={outgoing?.status === 'waiting'}
                     className="flex w-full cursor-pointer items-center gap-3 px-1 py-2.5 disabled:opacity-50"
                   >
-                    <span className="shrink-0">
+                    <span className={`shrink-0 ${outgoing?.toId === peer.id && outgoing.status === 'waiting' ? 'animate-pulse' : ''}`}>
                       <PeerAvatar pfp={peer.pfp} device={peer.device} name={peer.name} size={LIST_ICON_PX[listIconSize]} />
                     </span>
                     <div className="min-w-0 flex-1 text-left">
                       <p className="truncate text-sm font-semibold text-[var(--ink)]">{peer.name}</p>
-                      <p className="text-xs text-[var(--muted)]">{DEVICE_LABEL[peer.device]}</p>
+                      <p className={`text-xs ${outgoing?.toId === peer.id ? (outgoing.status === 'accepted' ? 'text-[var(--success)]' : outgoing.status === 'declined' ? 'text-[var(--error)]' : 'text-[var(--muted)]') : 'text-[var(--muted)]'}`}>
+                        {outgoing?.toId === peer.id
+                          ? (outgoing.status === 'waiting' ? 'Waiting…' : outgoing.status === 'accepted' ? 'Accepted!' : 'Declined')
+                          : DEVICE_LABEL[peer.device]}
+                      </p>
                     </div>
                   </button>
                 </li>
@@ -188,12 +200,17 @@ export function SharePage({
                     disabled={outgoing?.status === 'waiting'}
                     className="flex w-full cursor-pointer flex-col items-center gap-1 rounded-[var(--radius-sm)] p-2 disabled:opacity-50"
                   >
-                    <span className="block aspect-square w-full overflow-hidden rounded-full">
+                    <span className={`block aspect-square w-full overflow-hidden rounded-full ${outgoing?.toId === peer.id && outgoing.status === 'waiting' ? 'animate-pulse' : ''}`}>
                       <PeerAvatar pfp={peer.pfp} device={peer.device} name={peer.name} className="h-full w-full" />
                     </span>
                     <span className="w-full truncate px-1 text-center text-xs font-semibold text-[var(--ink)]">
                       {peer.name}
                     </span>
+                    {outgoing?.toId === peer.id && (
+                      <span className={`text-xs ${outgoing.status === 'accepted' ? 'text-[var(--success)]' : outgoing.status === 'declined' ? 'text-[var(--error)]' : 'text-[var(--muted)]'}`}>
+                        {outgoing.status === 'waiting' ? 'Waiting…' : outgoing.status === 'accepted' ? 'Accepted!' : 'Declined'}
+                      </span>
+                    )}
                   </button>
                 </li>
               ))}
@@ -210,42 +227,7 @@ export function SharePage({
       <div className="sticky bottom-0 -mx-4 px-4 min-[680px]:grid min-[680px]:grid-cols-[minmax(16rem,1fr)_minmax(0,42rem)_minmax(0,1fr)] min-[680px]:gap-0">
         <div className="hidden min-[680px]:block" />
         <div className="mx-auto w-full max-w-2xl">
-          {outgoing && (
-            <div className="mb-3 flex items-center gap-3 rounded-[1.25rem] border border-[var(--line)] bg-[var(--panel-strong)] p-4 shadow-[var(--shadow-card)]">
-              {outgoing.status === 'waiting' && (
-                <>
-                  <Spinner size={20} />
-                  <p className="flex-1 text-sm text-[var(--ink)]">
-                    Waiting for <strong>{outgoing.toName}</strong> to accept…
-                  </p>
-                  <button onClick={onClearOutgoing} className="text-sm font-semibold text-[var(--muted)]">
-                    Cancel
-                  </button>
-                </>
-              )}
-              {outgoing.status === 'accepted' && (
-                <>
-                  <p className="flex-1 text-sm text-[var(--success)]">
-                    <strong>{outgoing.toName}</strong> accepted! Transfer coming in the next update.
-                  </p>
-                  <button onClick={onClearOutgoing} className="text-sm font-semibold text-[var(--accent)]">
-                    OK
-                  </button>
-                </>
-              )}
-              {outgoing.status === 'declined' && (
-                <>
-                  <p className="flex-1 text-sm text-[var(--error)]">
-                    <strong>{outgoing.toName}</strong> declined the request.
-                  </p>
-                  <button onClick={onClearOutgoing} className="text-sm font-semibold text-[var(--accent)]">
-                    OK
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-          <p className="relative z-10 mb-0.5 text-center text-xs text-[var(--muted)]">
+<p className="relative z-10 mb-0.5 text-center text-xs text-[var(--muted)]">
             Empty list? Ensure you're both on the same Wi-Fi
           </p>
           <div className="relative">
