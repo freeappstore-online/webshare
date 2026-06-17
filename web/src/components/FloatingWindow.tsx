@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 interface FloatingWindowProps {
   open: boolean
@@ -18,6 +18,24 @@ export function FloatingWindow({ open, dim = true, closeOnBackdrop = false, onCl
   // stays mounted while the close animation plays
   const [render, setRender] = useState(open)
 
+  // On mobile, lock the paddingTop once so the top edge doesn't move when content shrinks
+  const cardRef = useRef<HTMLDivElement>(null)
+  const [mobilePt, setMobilePt] = useState<number | undefined>(undefined)
+  const ptLocked = useRef(false)
+
+  useLayoutEffect(() => {
+    if (open && render && !ptLocked.current && cardRef.current && window.innerWidth < 640) {
+      ptLocked.current = true
+      const cardH = cardRef.current.offsetHeight
+      const vh = window.innerHeight
+      setMobilePt(Math.max(16, (vh - cardH) / 2))
+    }
+    if (!render) {
+      ptLocked.current = false
+      setMobilePt(undefined)
+    }
+  }, [open, render])
+
   // freeze the last open-state content & dim during the exit animation, so the
   // window fades away intact even if props change (e.g. welcome → edit)
   const lastChildren = useRef(children)
@@ -36,8 +54,9 @@ export function FloatingWindow({ open, dim = true, closeOnBackdrop = false, onCl
   return (
     <div
       onClick={closeOnBackdrop ? onClose : undefined}
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-[4.5rem]"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:pt-[4.5rem]"
       style={{
+        paddingTop: mobilePt !== undefined ? mobilePt : undefined,
         background: (open ? dim : lastDim.current) ? 'rgba(0, 0, 0, 0.4)' : 'transparent',
         // composite the fade on the GPU — repainting a fullscreen dim over the
         // blurred body blobs tanks the frame rate otherwise
@@ -54,6 +73,7 @@ export function FloatingWindow({ open, dim = true, closeOnBackdrop = false, onCl
           if (e.target !== e.currentTarget) return
           if (!open) setRender(false)
         }}
+        ref={cardRef}
         className="w-full max-w-sm rounded-[var(--radius)] p-4"
         style={{
           // elevated surface: near-white in light mode; in dark mode a lifted gray
