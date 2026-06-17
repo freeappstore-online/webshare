@@ -533,7 +533,7 @@ function Main({
           onBack={() => setPage('files')}
         />
       )}
-      <IncomingShare request={room.incoming} onRespond={room.respondToShare} />
+      <IncomingShare request={room.incoming} onRespond={room.respondToShare} onDismiss={room.dismissIncoming} />
     </div>
   )
 }

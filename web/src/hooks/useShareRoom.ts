@@ -48,7 +48,7 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
           prev.map((o) => o.reqId === m.reqId ? { ...o, status: m.accept ? 'accepted' : 'declined' } : o)
         )
       } else if (m?.t === 'share-cancel') {
-        setIncoming((prev) => prev?.reqId === m.reqId ? null : prev)
+        setIncoming((prev) => prev?.reqId === m.reqId ? { ...prev, withdrawn: true } : prev)
       }
     }
     client.connect()
@@ -98,5 +98,7 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
     setOutgoing((prev) => prev.filter((o) => o.reqId !== reqId))
   }, [])
 
-  return { connection, peers, incoming, outgoing, sendShareRequest, withdrawShareRequest, respondToShare, clearOutgoing }
+  const dismissIncoming = useCallback(() => setIncoming(null), [])
+
+  return { connection, peers, incoming, outgoing, sendShareRequest, withdrawShareRequest, respondToShare, clearOutgoing, dismissIncoming }
 }

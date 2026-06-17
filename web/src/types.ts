@@ -32,6 +32,7 @@ export interface IncomingRequest {
   /** true file count — `files` may be capped for very large batches */
   total: number
   files: FileMeta[]
+  withdrawn?: boolean
 }
 
 export interface OutgoingRequest {
