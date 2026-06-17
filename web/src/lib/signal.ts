@@ -43,6 +43,7 @@ export class SignalClient {
   private explicitlyClosed = false
   private attempt = 0
   private timer: ReturnType<typeof setTimeout> | undefined
+  private quickReconnect = false
 
   constructor(url: string) {
     this.url = url
@@ -79,7 +80,8 @@ export class SignalClient {
         this.onState('closed')
         return
       }
-      const delay = Math.min(1000 * 2 ** this.attempt++, 15000)
+      const delay = this.quickReconnect ? 0 : Math.min(1000 * 2 ** this.attempt++, 15000)
+      this.quickReconnect = false
       this.onState('connecting')
       this.timer = setTimeout(() => this.connect(), delay)
     })
@@ -103,8 +105,9 @@ export class SignalClient {
   /** Stop announcing — bounces the socket so the server drops us from the roster. */
   clearHello(): void {
     this.hello = null
-    this.attempt = 0 // reset backoff so re-enabling is instant
-    this.socket?.close() // explicitlyClosed is false, so auto-reconnect fires without hello
+    this.attempt = 0
+    this.quickReconnect = true  // reconnect instantly so we rejoin and get current roster
+    this.socket?.close()
   }
 
   sendTo(to: string, data: unknown): void {

@@ -45,6 +45,9 @@ export class RoomDO {
     const att: Attachment = { id: crypto.randomUUID() }
     server.serializeAttachment(att)
     server.send(JSON.stringify({ t: 'you', id: att.id }))
+    // Send the current roster immediately so late-joining clients see peers
+    // that announced before this connection was established.
+    this.broadcastRoster()
     return new Response(null, { status: 101, webSocket: client })
   }
 
