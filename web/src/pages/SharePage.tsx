@@ -140,6 +140,7 @@ export function SharePage({
           )}
 
           <div className="ws-scroll min-h-0 flex-1 overflow-y-auto pb-6 mb-[6px]">
+
           {connection === 'open' && peers.length === 0 && (
             <div className="flex items-center justify-center py-8">
               <EmptyState

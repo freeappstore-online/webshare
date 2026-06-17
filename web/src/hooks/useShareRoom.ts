@@ -25,7 +25,6 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
   const [outgoing, setOutgoing] = useState<OutgoingRequest[]>([])
 
   const clientRef = useRef<SignalClient | null>(null)
-  const peersRef = useRef<PeerInfo[]>([])
 
   useEffect(() => {
     const client = new SignalClient(signalUrl())
@@ -33,16 +32,13 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
 
     client.onState = setConnection
     client.onPeers = (list) => {
-      const sorted = [...list].sort((a, b) => a.name.localeCompare(b.name))
-      peersRef.current = sorted
-      setPeers(sorted)
+      setPeers([...list].sort((a, b) => a.name.localeCompare(b.name)))
     }
     client.onMessage = (from, data) => {
       const m = data as PeerMsg
       if (m?.t === 'share-req') {
-        const peer = peersRef.current.find((p) => p.id === from)
         setIncoming({
-          from: peer ?? { id: from, name: 'Someone', device: 'desktop', pfp: null },
+          from: { id: from, name: m.name, device: m.device, pfp: m.pfp },
           reqId: m.reqId,
           total: m.total,
           files: m.files,
@@ -77,10 +73,13 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
       reqId,
       total: metas.length,
       files: metas.slice(0, MAX_METAS_PER_REQUEST),
+      name: profile.name,
+      device: detectDevice(),
+      pfp: profile.pfp,
     }
     clientRef.current?.sendTo(peer.id, msg)
     setOutgoing((prev) => [...prev, { reqId, toId: peer.id, toName: peer.name, status: 'waiting' }])
-  }, [])
+  }, [profile])
 
   const respondToShare = useCallback((req: IncomingRequest, accept: boolean) => {
     const msg: PeerMsg = { t: 'share-resp', reqId: req.reqId, accept }

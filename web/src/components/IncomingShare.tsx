@@ -12,21 +12,25 @@ export function IncomingShare({ request, onRespond }: IncomingShareProps) {
     <FloatingWindow open={!!request} onClose={() => request && onRespond(request, false)}>
       {request && (
         <div className="flex flex-col items-center gap-4 text-center">
-          <PeerAvatar pfp={request.from.pfp} device={request.from.device} name={request.from.name} size={64} />
-          <p className="text-base font-semibold text-[var(--ink)]">
-            <span className="font-bold">{request.from.name}</span> would like to share{' '}
-            {request.total} item{request.total === 1 ? '' : 's'} with you
-          </p>
+          <div className="flex flex-col items-center gap-1.5">
+            <PeerAvatar pfp={request.from.pfp} device={null} name={request.from.name} size={80} />
+            <p className="text-xl font-bold text-[var(--ink)]" style={{ fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif", letterSpacing: '-0.01em' }}>
+              {request.from.name}
+            </p>
+            <p className="text-sm text-[var(--muted)]">
+              would like to share {request.total} item{request.total === 1 ? '' : 's'}
+            </p>
+          </div>
           <div className="flex w-full gap-3">
             <button
               onClick={() => onRespond(request, false)}
-              className="min-h-12 flex-1 cursor-pointer rounded-[var(--radius)] border border-[var(--line-strong)] bg-[var(--panel)] font-bold text-[var(--ink)]"
+              className="min-h-12 flex-1 cursor-pointer rounded-full border border-[var(--line-strong)] bg-[var(--panel)] font-bold text-[var(--ink)]"
             >
               Decline
             </button>
             <button
               onClick={() => onRespond(request, true)}
-              className="min-h-12 flex-1 cursor-pointer rounded-[var(--radius)] bg-[var(--accent)] font-bold text-white"
+              className="min-h-12 flex-1 cursor-pointer rounded-full bg-[var(--accent)] font-bold text-white"
             >
               Accept
             </button>
