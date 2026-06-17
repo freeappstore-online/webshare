@@ -21,7 +21,7 @@ interface FilesPageProps {
   files: File[]
   onFilesChange: (files: File[]) => void
   onAddFiles: (files: FileList | File[] | null) => void
-  onShare: () => void
+  onShare: (filesToShare: File[]) => void
   onEditProfile: () => void
   onOpenAddPicker: () => void
   /** owned by App so the nav bar's add-files button can open the picker */
@@ -558,7 +558,12 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
           <div className="relative mx-auto w-full max-w-2xl">
             <div className="pointer-events-none absolute bottom-full left-0 right-0 h-4" style={{ background: 'linear-gradient(to bottom, transparent, var(--bg-end))' }} />
               <button
-                onClick={onShare}
+                onClick={() => {
+                  const filesToShare = selectMode && selected.size > 0
+                    ? files.filter((f) => selected.has(fileKey(f)))
+                    : files
+                  onShare(filesToShare)
+                }}
                 className="relative z-10 flex w-full cursor-pointer items-center justify-center rounded-full bg-[var(--accent)] py-2 font-bold text-white shadow-sm"
               >
                 {selectMode && selected.size > 0

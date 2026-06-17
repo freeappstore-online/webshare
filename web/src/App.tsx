@@ -99,6 +99,7 @@ export default function App() {
   const pickShareListIconSize = (s: ListIconSize) => { setShareListIconSize(s); localStorage.setItem(SHARE_LIST_ICON_KEY, s) }
 
   const [files, setFiles] = useState<File[]>([])
+  const [filesToShare, setFilesToShare] = useState<File[]>([])
   const [dragOver, setDragOver] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const folderInput = useRef<HTMLInputElement>(null)
@@ -241,18 +242,18 @@ export default function App() {
             </button>
           </div>
 
-          {page === 'share' && files.length > 0 ? (
+          {page === 'share' && filesToShare.length > 0 ? (
             <div className="hidden min-[680px]:flex w-full min-w-0 items-center gap-2">
               <p className="flex-1 min-w-0 truncate text-sm font-bold text-[var(--ink)]">
                 {shareView === 'icons' ? (
                   <>
-                    <span className="min-[720px]:hidden">Tap to send {files.length} item{files.length !== 1 ? 's' : ''}</span>
-                    <span className="hidden min-[720px]:inline">Tap people to send {files.length} item{files.length !== 1 ? 's' : ''}</span>
+                    <span className="min-[720px]:hidden">Tap to send {filesToShare.length} item{filesToShare.length !== 1 ? 's' : ''}</span>
+                    <span className="hidden min-[720px]:inline">Tap people to send {filesToShare.length} item{filesToShare.length !== 1 ? 's' : ''}</span>
                   </>
                 ) : (
                   <>
-                    <span className="min-[750px]:hidden">Tap to send {files.length} item{files.length !== 1 ? 's' : ''}</span>
-                    <span className="hidden min-[750px]:inline">Tap people to send {files.length} item{files.length !== 1 ? 's' : ''}</span>
+                    <span className="min-[750px]:hidden">Tap to send {filesToShare.length} item{filesToShare.length !== 1 ? 's' : ''}</span>
+                    <span className="hidden min-[750px]:inline">Tap people to send {filesToShare.length} item{filesToShare.length !== 1 ? 's' : ''}</span>
                   </>
                 )}
               </p>
@@ -394,6 +395,8 @@ export default function App() {
           setPage={setPage}
           files={files}
           setFiles={setFiles}
+          filesToShare={filesToShare}
+          setFilesToShare={setFilesToShare}
           fileInput={fileInput}
           folderInput={folderInput}
           dragOver={dragOver}
@@ -455,6 +458,8 @@ function Main({
   setPage,
   files,
   setFiles,
+  filesToShare,
+  setFilesToShare,
   fileInput,
   folderInput,
   dragOver,
@@ -476,6 +481,8 @@ function Main({
   setPage: (page: 'files' | 'share') => void
   files: File[]
   setFiles: (files: File[]) => void
+  filesToShare: File[]
+  setFilesToShare: (files: File[]) => void
   fileInput: RefObject<HTMLInputElement | null>
   folderInput: RefObject<HTMLInputElement | null>
   dragOver: boolean
@@ -491,7 +498,7 @@ function Main({
   const room = useShareRoom(profile, discoverable)
 
   const pickRecipient = (peer: PeerInfo) => {
-    room.sendShareRequest(peer, files.map(toFileMeta))
+    room.sendShareRequest(peer, filesToShare.map(toFileMeta))
   }
 
   return (
@@ -506,7 +513,7 @@ function Main({
           files={files}
           onFilesChange={setFiles}
           onAddFiles={onAddFiles}
-          onShare={() => setPage('share')}
+          onShare={(f) => { setFilesToShare(f); setPage('share') }}
           onEditProfile={onEditProfile}
           onOpenAddPicker={onOpenAddPicker}
           inputRef={fileInput}
@@ -518,7 +525,7 @@ function Main({
       ) : (
         <SharePage
           profile={profile}
-          fileCount={files.length}
+          fileCount={filesToShare.length}
           view={shareView}
           perRow={sharePerRow}
           listIconSize={shareListIconSize}
