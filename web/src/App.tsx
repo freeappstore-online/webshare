@@ -348,7 +348,7 @@ export default function App() {
           </div>
           <p className="flex items-center gap-1.5 px-1 text-xs opacity-55 text-[var(--ink)]">
             <TriangleInfoIcon size={18} className="shrink-0" />
-            Use drag &amp; drop to add folders containing more than 1,000 files
+            Use drag &amp; drop to add folders having more than 1,000 files
           </p>
           <button
             onClick={() => setAddPickerOpen(false)}
