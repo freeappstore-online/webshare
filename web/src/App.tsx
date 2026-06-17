@@ -529,6 +529,7 @@ function Main({
           connection={room.connection}
           outgoing={room.outgoing}
           onPick={pickRecipient}
+          onWithdraw={room.withdrawShareRequest}
           onBack={() => setPage('files')}
         />
       )}

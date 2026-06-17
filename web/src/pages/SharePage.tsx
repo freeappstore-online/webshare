@@ -28,6 +28,7 @@ interface SharePageProps {
   connection: SignalState
   outgoing: OutgoingRequest[]
   onPick: (peer: PeerInfo) => void
+  onWithdraw: (reqId: string, toId: string) => void
   onBack: () => void
 }
 
@@ -44,6 +45,7 @@ export function SharePage({
   connection,
   outgoing,
   onPick,
+  onWithdraw,
   onBack,
 }: SharePageProps) {
   // map toId → most recent outgoing request for that peer
@@ -162,7 +164,7 @@ export function SharePage({
                     style={{ '--sep-left': `${4 + LIST_ICON_PX[listIconSize] + 12}px` } as React.CSSProperties}
                   >
                     <button
-                      onClick={() => onPick(peer)}
+                      onClick={() => req?.status === 'waiting' ? onWithdraw(req.reqId, peer.id) : onPick(peer)}
                       className="flex w-full cursor-pointer items-center gap-3 px-1 py-2.5"
                     >
                       <span className={`shrink-0 ${isPulsing ? 'animate-avatar-pulse' : ''}`}>
@@ -170,8 +172,8 @@ export function SharePage({
                       </span>
                       <div className="min-w-0 flex-1 text-left">
                         <p className="truncate text-sm font-semibold text-[var(--ink)]">{peer.name}</p>
-                        <p className={`text-xs ${req ? (req.status === 'accepted' ? 'text-[var(--success)]' : req.status === 'declined' ? 'text-[var(--error)]' : 'text-[var(--muted)]') : 'text-[var(--muted)]'}`}>
-                          {req ? (req.status === 'waiting' ? 'Waiting…' : req.status === 'accepted' ? 'Sent' : 'Declined') : DEVICE_LABEL[peer.device]}
+                        <p className={`text-xs ${req ? (req.status === 'accepted' ? 'text-[var(--success)]' : req.status === 'declined' ? 'text-[var(--error)]' : req.status === 'withdrawn' ? 'text-[var(--warning)]' : 'text-[var(--muted)]') : 'text-[var(--muted)]'}`}>
+                          {req ? (req.status === 'waiting' ? 'Waiting…' : req.status === 'accepted' ? 'Sent' : req.status === 'withdrawn' ? 'Withdrawn' : 'Declined') : DEVICE_LABEL[peer.device]}
                         </p>
                       </div>
                     </button>
@@ -192,7 +194,7 @@ export function SharePage({
                 return (
                   <li key={peer.id}>
                     <button
-                      onClick={() => onPick(peer)}
+                      onClick={() => req?.status === 'waiting' ? onWithdraw(req.reqId, peer.id) : onPick(peer)}
                       className="flex w-full cursor-pointer flex-col items-center gap-1 rounded-[var(--radius-sm)] p-2"
                     >
                       <span
@@ -205,8 +207,8 @@ export function SharePage({
                           {peer.name}
                         </span>
                         {req && (
-                          <span className={`text-xs leading-tight ${req.status === 'accepted' ? 'text-[var(--success)]' : req.status === 'declined' ? 'text-[var(--error)]' : 'text-[var(--muted)]'}`}>
-                            {req.status === 'waiting' ? 'Waiting…' : req.status === 'accepted' ? 'Sent' : 'Declined'}
+                          <span className={`text-xs leading-tight ${req.status === 'accepted' ? 'text-[var(--success)]' : req.status === 'declined' ? 'text-[var(--error)]' : req.status === 'withdrawn' ? 'text-[var(--warning)]' : 'text-[var(--muted)]'}`}>
+                            {req.status === 'waiting' ? 'Waiting…' : req.status === 'accepted' ? 'Sent' : req.status === 'withdrawn' ? 'Withdrawn' : 'Declined'}
                           </span>
                         )}
                       </div>

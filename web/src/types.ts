@@ -38,10 +38,11 @@ export interface OutgoingRequest {
   reqId: string
   toId: string
   toName: string
-  status: 'waiting' | 'accepted' | 'declined'
+  status: 'waiting' | 'accepted' | 'declined' | 'withdrawn'
 }
 
 /** Peer-to-peer payloads relayed through the signaling server. */
 export type PeerMsg =
   | { t: 'share-req'; reqId: string; total: number; files: FileMeta[]; name: string; device: DeviceKind; pfp: string | null }
   | { t: 'share-resp'; reqId: string; accept: boolean }
+  | { t: 'share-cancel'; reqId: string }
