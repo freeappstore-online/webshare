@@ -90,12 +90,17 @@ export class SignalClient {
     this.hello = hello
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify({ t: 'hello', ...hello }))
+    } else if (!this.socket && !this.explicitlyClosed) {
+      // Re-enabling while waiting on backoff timer — skip the wait
+      clearTimeout(this.timer)
+      this.connect()
     }
   }
 
   /** Stop announcing — bounces the socket so the server drops us from the roster. */
   clearHello(): void {
     this.hello = null
+    this.attempt = 0 // reset backoff so re-enabling is instant
     this.socket?.close() // explicitlyClosed is false, so auto-reconnect fires without hello
   }
 

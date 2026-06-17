@@ -332,7 +332,7 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
             className="flex w-full max-w-[220px] cursor-pointer items-center justify-between gap-3"
           >
             <div className="flex h-10 flex-col items-start justify-center">
-              <span className="text-sm font-semibold text-[var(--ink)]">Discoverable to others</span>
+              <span className="text-sm font-semibold text-[var(--ink)]">Discoverable to senders</span>
               <span className={`text-xs text-[var(--muted)] ${discoverable ? 'hidden' : ''}`}>Enable to let senders see you</span>
             </div>
             <span
