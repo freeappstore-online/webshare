@@ -529,7 +529,6 @@ function Main({
           connection={room.connection}
           outgoing={room.outgoing}
           onPick={pickRecipient}
-          onClearOutgoing={room.clearOutgoing}
           onBack={() => setPage('files')}
         />
       )}

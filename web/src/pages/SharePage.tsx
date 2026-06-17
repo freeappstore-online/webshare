@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react'
 import { EmptyState } from '@freeappstore/sdk/ui'
 import { Dropdown } from '../components/Dropdown'
 import { PeerAvatar } from '../components/PeerAvatar'
@@ -29,7 +28,6 @@ interface SharePageProps {
   connection: SignalState
   outgoing: OutgoingRequest[]
   onPick: (peer: PeerInfo) => void
-  onClearOutgoing: (reqId: string) => void
   onBack: () => void
 }
 
@@ -46,24 +44,11 @@ export function SharePage({
   connection,
   outgoing,
   onPick,
-  onClearOutgoing,
   onBack,
 }: SharePageProps) {
   // map toId → most recent outgoing request for that peer
   const outgoingByPeer: Record<string, OutgoingRequest> = {}
   for (const o of outgoing) outgoingByPeer[o.toId] = o
-
-  const clearTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
-  useEffect(() => {
-    for (const o of outgoing) {
-      if ((o.status === 'accepted' || o.status === 'declined') && !clearTimersRef.current[o.reqId]) {
-        clearTimersRef.current[o.reqId] = setTimeout(() => {
-          delete clearTimersRef.current[o.reqId]
-          onClearOutgoing(o.reqId)
-        }, 2000)
-      }
-    }
-  }, [outgoing, onClearOutgoing])
 
   return (
     <div className="mx-auto flex min-h-0 w-full flex-1 flex-col p-4">
@@ -185,7 +170,7 @@ export function SharePage({
                       <div className="min-w-0 flex-1 text-left">
                         <p className="truncate text-sm font-semibold text-[var(--ink)]">{peer.name}</p>
                         <p className={`text-xs ${req ? (req.status === 'accepted' ? 'text-[var(--success)]' : req.status === 'declined' ? 'text-[var(--error)]' : 'text-[var(--muted)]') : 'text-[var(--muted)]'}`}>
-                          {req ? (req.status === 'waiting' ? 'Waiting' : req.status === 'accepted' ? 'Accepted!' : 'Declined') : DEVICE_LABEL[peer.device]}
+                          {req ? (req.status === 'waiting' ? 'Waiting…' : req.status === 'accepted' ? 'Sent' : 'Declined') : DEVICE_LABEL[peer.device]}
                         </p>
                       </div>
                     </button>
@@ -220,7 +205,7 @@ export function SharePage({
                         </span>
                         {req && (
                           <span className={`text-xs leading-tight ${req.status === 'accepted' ? 'text-[var(--success)]' : req.status === 'declined' ? 'text-[var(--error)]' : 'text-[var(--muted)]'}`}>
-                            {req.status === 'waiting' ? 'Waiting' : req.status === 'accepted' ? 'Accepted!' : 'Declined'}
+                            {req.status === 'waiting' ? 'Waiting…' : req.status === 'accepted' ? 'Sent' : 'Declined'}
                           </span>
                         )}
                       </div>
