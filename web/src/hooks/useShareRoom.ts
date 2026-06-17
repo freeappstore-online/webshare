@@ -22,12 +22,10 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
   const [connection, setConnection] = useState<SignalState>('connecting')
   const [peers, setPeers] = useState<PeerInfo[]>([])
   const [incoming, setIncoming] = useState<IncomingRequest | null>(null)
-  const [outgoing, setOutgoing] = useState<OutgoingRequest | null>(null)
+  const [outgoing, setOutgoing] = useState<OutgoingRequest[]>([])
 
   const clientRef = useRef<SignalClient | null>(null)
   const peersRef = useRef<PeerInfo[]>([])
-  const outgoingRef = useRef<OutgoingRequest | null>(null)
-  outgoingRef.current = outgoing
 
   useEffect(() => {
     const client = new SignalClient(signalUrl())
@@ -50,10 +48,9 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
           files: m.files,
         })
       } else if (m?.t === 'share-resp') {
-        const current = outgoingRef.current
-        if (current?.reqId === m.reqId) {
-          setOutgoing({ ...current, status: m.accept ? 'accepted' : 'declined' })
-        }
+        setOutgoing((prev) =>
+          prev.map((o) => o.reqId === m.reqId ? { ...o, status: m.accept ? 'accepted' : 'declined' } : o)
+        )
       }
     }
     client.connect()
@@ -82,7 +79,7 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
       files: metas.slice(0, MAX_METAS_PER_REQUEST),
     }
     clientRef.current?.sendTo(peer.id, msg)
-    setOutgoing({ reqId, toId: peer.id, toName: peer.name, status: 'waiting' })
+    setOutgoing((prev) => [...prev, { reqId, toId: peer.id, toName: peer.name, status: 'waiting' }])
   }, [])
 
   const respondToShare = useCallback((req: IncomingRequest, accept: boolean) => {
@@ -91,7 +88,9 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
     setIncoming(null)
   }, [])
 
-  const clearOutgoing = useCallback(() => setOutgoing(null), [])
+  const clearOutgoing = useCallback((reqId: string) => {
+    setOutgoing((prev) => prev.filter((o) => o.reqId !== reqId))
+  }, [])
 
   return { connection, peers, incoming, outgoing, sendShareRequest, respondToShare, clearOutgoing }
 }

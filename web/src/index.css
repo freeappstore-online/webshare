@@ -1,5 +1,27 @@
 @import "tailwindcss";
 
+@keyframes avatar-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.94); opacity: 0.65; }
+}
+@keyframes avatar-pulse-tint {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 0.35; }
+}
+.animate-avatar-pulse {
+  animation: avatar-pulse 1.4s ease-in-out infinite;
+  position: relative;
+}
+.animate-avatar-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background-color: var(--muted);
+  animation: avatar-pulse-tint 1.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
 @layer base {
 
 :root {
