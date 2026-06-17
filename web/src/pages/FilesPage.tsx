@@ -30,6 +30,8 @@ interface FilesPageProps {
   folderInputRef: RefObject<HTMLInputElement | null>
   /** drag detection is full-screen (window listeners in App) */
   dragOver: boolean
+  discoverable: boolean
+  onDiscoverableChange: (v: boolean) => void
 }
 
 type ViewMode = 'icons' | 'list'
@@ -47,7 +49,7 @@ const VIEWS: Array<{ key: ViewMode; label: string; Icon: typeof ViewListIcon }> 
 ]
 
 /** Main page: who you are, stage files to share, then pick a recipient. */
-export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, onEditProfile, onOpenAddPicker, inputRef: input, folderInputRef: folderInput, dragOver }: FilesPageProps) {
+export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, onEditProfile, onOpenAddPicker, inputRef: input, folderInputRef: folderInput, dragOver, discoverable, onDiscoverableChange }: FilesPageProps) {
   const [view, setView] = useState<ViewMode>(() => {
     const stored = localStorage.getItem(VIEW_KEY)
     return stored === 'icons' || stored === 'list' ? stored : 'icons'
@@ -319,6 +321,33 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
           <span className="text-sm font-semibold text-[var(--ink)]">Add files…</span>
           <span className="text-xs">or drag &amp; drop here</span>
         </button>
+      )}
+
+      {!hasFiles && (
+        <div className="mt-5 flex flex-col items-center">
+          <button
+            role="switch"
+            aria-checked={discoverable}
+            onClick={() => onDiscoverableChange(!discoverable)}
+            className="flex w-full max-w-[220px] cursor-pointer items-center justify-between gap-3"
+          >
+            <div className="flex h-10 flex-col items-start justify-center">
+              <span className="text-sm font-semibold text-[var(--ink)]">Discoverable to others</span>
+              <span className={`text-xs text-[var(--muted)] ${discoverable ? 'hidden' : ''}`}>Enable to let senders see you</span>
+            </div>
+            <span
+              className={`relative inline-flex h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
+                discoverable ? 'bg-[var(--accent)]' : 'bg-[var(--line-strong)]'
+              }`}
+            >
+              <span
+                className={`absolute top-[2px] h-[27px] w-[27px] rounded-full bg-white shadow-md transition-transform duration-200 ${
+                  discoverable ? 'translate-x-[22px]' : 'translate-x-[2px]'
+                }`}
+              />
+            </span>
+          </button>
+        </div>
       )}
 
       {files.length === 0 ? (

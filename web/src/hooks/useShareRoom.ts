@@ -18,7 +18,7 @@ const MAX_METAS_PER_REQUEST = 800
  * IP (= same local network) see each other; share requests are relayed
  * peer-to-peer through it. No accounts involved.
  */
-export function useShareRoom(profile: Profile) {
+export function useShareRoom(profile: Profile, discoverable: boolean) {
   const [connection, setConnection] = useState<SignalState>('connecting')
   const [peers, setPeers] = useState<PeerInfo[]>([])
   const [incoming, setIncoming] = useState<IncomingRequest | null>(null)
@@ -64,10 +64,14 @@ export function useShareRoom(profile: Profile) {
     }
   }, [])
 
-  // announce identity now and on every profile change (re-sent on reconnects too)
+  // announce or retract identity based on discoverability
   useEffect(() => {
-    clientRef.current?.setHello({ name: profile.name, device: detectDevice(), pfp: profile.pfp })
-  }, [profile])
+    if (discoverable) {
+      clientRef.current?.setHello({ name: profile.name, device: detectDevice(), pfp: profile.pfp })
+    } else {
+      clientRef.current?.clearHello()
+    }
+  }, [profile, discoverable])
 
   const sendShareRequest = useCallback((peer: PeerInfo, metas: FileMeta[]) => {
     const reqId = crypto.randomUUID().slice(0, 8)

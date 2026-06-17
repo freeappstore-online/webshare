@@ -78,6 +78,7 @@ export default function App() {
   // staged files live here so the nav bar can host the add-files button;
   // the hidden file input itself renders inside FilesPage
   const [page, setPage] = useState<'files' | 'share'>('files')
+  const [discoverable, setDiscoverable] = useState(false)
 
   const [shareView, setShareView] = useState<ViewMode>(() => {
     const s = localStorage.getItem(SHARE_VIEW_KEY)
@@ -402,6 +403,8 @@ export default function App() {
           onShareViewChange={pickShareView}
           onSharePerRowChange={pickSharePerRow}
           onShareListIconSizeChange={pickShareListIconSize}
+          discoverable={discoverable}
+          onDiscoverableChange={setDiscoverable}
         />
       )}
 
@@ -461,6 +464,8 @@ function Main({
   onShareViewChange,
   onSharePerRowChange,
   onShareListIconSizeChange,
+  discoverable,
+  onDiscoverableChange,
 }: {
   profile: Profile
   animation: string
@@ -480,8 +485,10 @@ function Main({
   onShareViewChange: (mode: ViewMode) => void
   onSharePerRowChange: (n: number) => void
   onShareListIconSizeChange: (s: ListIconSize) => void
+  discoverable: boolean
+  onDiscoverableChange: (v: boolean) => void
 }) {
-  const room = useShareRoom(profile)
+  const room = useShareRoom(profile, discoverable)
 
   const pickRecipient = (peer: PeerInfo) => {
     room.sendShareRequest(peer, files.map(toFileMeta))
@@ -505,6 +512,8 @@ function Main({
           inputRef={fileInput}
           folderInputRef={folderInput}
           dragOver={dragOver}
+          discoverable={discoverable}
+          onDiscoverableChange={onDiscoverableChange}
         />
       ) : (
         <SharePage

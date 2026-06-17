@@ -93,6 +93,12 @@ export class SignalClient {
     }
   }
 
+  /** Stop announcing — bounces the socket so the server drops us from the roster. */
+  clearHello(): void {
+    this.hello = null
+    this.socket?.close() // explicitlyClosed is false, so auto-reconnect fires without hello
+  }
+
   sendTo(to: string, data: unknown): void {
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify({ t: 'msg', to, data }))
