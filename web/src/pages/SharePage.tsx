@@ -144,7 +144,7 @@ export function SharePage({
             <div className="flex items-center justify-center py-8">
               <EmptyState
                 title="No one's here yet"
-                message="Ask the other person to open webshare on the same Wi-Fi — they'll show up here. No sign-up needed."
+                message="Ask the other person to open Webshare on the same Wi-Fi — they'll show up here. No sign-up needed."
               />
             </div>
           )}
@@ -250,7 +250,7 @@ export function SharePage({
           </p>
           <div className="relative">
             <div className="pointer-events-none absolute bottom-full left-0 right-0 h-4" style={{ background: 'linear-gradient(to bottom, transparent, var(--bg-end))' }} />
-            <div className="relative z-10 rounded-full bg-[var(--bg-end)] shadow-sm">
+            <div className="relative z-10 rounded-full bg-[var(--bg-end)]">
               <button
                 onClick={onBack}
                 className="flex w-full cursor-pointer items-center justify-center rounded-full border border-[var(--secondary-btn-border)] bg-[var(--secondary-btn-bg)] py-2 font-bold text-[var(--secondary-btn-text)]"
