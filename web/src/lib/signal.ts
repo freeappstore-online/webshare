@@ -90,8 +90,11 @@ export class SignalClient {
     this.hello = hello
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify({ t: 'hello', ...hello }))
-    } else if (!this.socket && !this.explicitlyClosed) {
-      // Re-enabling while waiting on backoff timer — skip the wait
+    } else if (
+      !this.explicitlyClosed &&
+      (!this.socket || this.socket.readyState === WebSocket.CLOSING || this.socket.readyState === WebSocket.CLOSED)
+    ) {
+      // Re-enabling while waiting on backoff timer, or while old socket is shutting down — skip the wait
       clearTimeout(this.timer)
       this.connect()
     }
