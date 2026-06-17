@@ -11,7 +11,7 @@ interface IncomingShareProps {
 export function IncomingShare({ request, onRespond, onDismiss }: IncomingShareProps) {
   const withdrawn = request?.withdrawn ?? false
   return (
-    <FloatingWindow open={!!request} onClose={withdrawn ? onDismiss : () => request && onRespond(request, false)}>
+    <FloatingWindow open={!!request} closeOnBackdrop onClose={withdrawn ? onDismiss : () => request && onRespond(request, false)}>
       {request && (
         <div className="flex flex-col items-center gap-4 text-center">
           <div className="flex flex-col items-center gap-1.5">
@@ -28,7 +28,7 @@ export function IncomingShare({ request, onRespond, onDismiss }: IncomingSharePr
               onClick={onDismiss}
               className="min-h-12 w-full cursor-pointer rounded-full border border-[var(--line-strong)] bg-[var(--panel)] font-bold text-[var(--ink)]"
             >
-              Ok
+              OK
             </button>
           ) : (
             <div className="flex w-full gap-3">
