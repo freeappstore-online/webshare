@@ -27,7 +27,7 @@ export function signalUrl(): string {
     return `ws://${host}:8787/ws`
   }
   // production default — replace once the worker is deployed, or set VITE_SIGNAL_URL
-  return 'wss://webshare-freeappstore.workers.dev/ws'
+  return 'wss://webshare.freeappstore.workers.dev/ws'
 }
 
 /** Anonymous WebSocket client for the webshare signaling worker, with auto-reconnect. */

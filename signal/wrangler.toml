@@ -1,7 +1,7 @@
 # webshare signaling server — deploy to YOUR OWN Cloudflare account:
 #   cd signal && npx wrangler login && pnpm deploy
 # Free plan is plenty (Durable Objects on SQLite backend).
-name = "webshare-freeappstore"
+name = "webshare"
 main = "src/index.ts"
 compatibility_date = "2026-06-01"
 
