@@ -24,6 +24,12 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
   const [incoming, setIncoming] = useState<IncomingRequest | null>(null)
   const [outgoing, setOutgoing] = useState<OutgoingRequest[]>([])
 
+  const [debouncedDiscoverable, setDebouncedDiscoverable] = useState(discoverable)
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedDiscoverable(discoverable), 400)
+    return () => clearTimeout(t)
+  }, [discoverable])
+
   const clientRef = useRef<SignalClient | null>(null)
 
   useEffect(() => {
@@ -61,12 +67,12 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
 
   // announce or retract identity based on discoverability
   useEffect(() => {
-    if (discoverable) {
+    if (debouncedDiscoverable) {
       clientRef.current?.setHello({ name: profile.name, device: detectDevice(), pfp: profile.pfp })
     } else {
       clientRef.current?.clearHello()
     }
-  }, [profile, discoverable])
+  }, [profile, debouncedDiscoverable])
 
   const sendShareRequest = useCallback((peer: PeerInfo, metas: FileMeta[]) => {
     const reqId = crypto.randomUUID().slice(0, 8)
