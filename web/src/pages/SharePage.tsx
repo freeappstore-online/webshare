@@ -26,6 +26,8 @@ interface SharePageProps {
   onPerRowChange: (n: number) => void
   onListIconSizeChange: (s: ListIconSize) => void
   peers: PeerInfo[]
+  /** people who entered our share code — shown in their own top section */
+  codePeers: PeerInfo[]
   connection: SignalState
   outgoing: OutgoingRequest[]
   /** active share code when this sender is hosting one */
@@ -46,6 +48,7 @@ export function SharePage({
   onPerRowChange,
   onListIconSizeChange,
   peers,
+  codePeers,
   connection,
   outgoing,
   shareCode,
@@ -57,6 +60,67 @@ export function SharePage({
   // map toId → most recent outgoing request for that peer
   const outgoingByPeer: Record<string, OutgoingRequest> = {}
   for (const o of outgoing) outgoingByPeer[o.toId] = o
+
+  const statusColor = (req: OutgoingRequest) =>
+    req.status === 'accepted' ? 'text-[var(--success)]' : req.status === 'declined' ? 'text-[var(--error)]' : req.status === 'withdrawn' ? 'text-[var(--warning)]' : 'text-[var(--muted)]'
+  const statusText = (req: OutgoingRequest) =>
+    req.status === 'waiting' ? 'Waiting…' : req.status === 'accepted' ? 'Sent' : req.status === 'withdrawn' ? 'Withdrawn' : 'Declined'
+
+  const listItem = (peer: PeerInfo) => {
+    const req = outgoingByPeer[peer.id]
+    const isPulsing = req?.status === 'waiting'
+    return (
+      <li
+        key={peer.id}
+        className="relative [&:not(:first-child)]:before:absolute [&:not(:first-child)]:before:content-[''] [&:not(:first-child)]:before:top-0 [&:not(:first-child)]:before:right-0 [&:not(:first-child)]:before:left-[var(--sep-left)] [&:not(:first-child)]:before:h-px [&:not(:first-child)]:before:bg-[var(--line-strong)]"
+        style={{ '--sep-left': `${4 + LIST_ICON_PX[listIconSize] + 12}px` } as React.CSSProperties}
+      >
+        <button
+          onClick={() => req?.status === 'waiting' ? onWithdraw(req.reqId, peer.id) : onPick(peer)}
+          className="flex w-full cursor-pointer items-center gap-3 px-1 py-2.5"
+        >
+          <span className={`shrink-0 ${isPulsing ? 'animate-avatar-pulse' : ''}`}>
+            <PeerAvatar pfp={peer.pfp} device={peer.device} name={peer.name} size={LIST_ICON_PX[listIconSize]} />
+          </span>
+          <div className="min-w-0 flex-1 text-left">
+            <p className="truncate text-sm font-semibold text-[var(--ink)]">{peer.name}</p>
+            <p className={`text-xs ${req ? statusColor(req) : 'text-[var(--muted)]'}`}>
+              {req ? statusText(req) : DEVICE_LABEL[peer.device]}
+            </p>
+          </div>
+        </button>
+      </li>
+    )
+  }
+
+  const iconItem = (peer: PeerInfo) => {
+    const req = outgoingByPeer[peer.id]
+    const isPulsing = req?.status === 'waiting'
+    return (
+      <li key={peer.id}>
+        <button
+          onClick={() => req?.status === 'waiting' ? onWithdraw(req.reqId, peer.id) : onPick(peer)}
+          className="flex w-full cursor-pointer flex-col items-center gap-1 rounded-[var(--radius-sm)] p-2"
+        >
+          <span
+            className={`block aspect-square w-full overflow-hidden rounded-full ${isPulsing ? 'animate-avatar-pulse' : ''}`}
+          >
+            <PeerAvatar pfp={peer.pfp} device={peer.device} name={peer.name} className="h-full w-full" />
+          </span>
+          <div className="flex w-full flex-col items-center">
+            <span className="w-full truncate px-1 text-center text-xs font-semibold text-[var(--ink)]">
+              {peer.name}
+            </span>
+            {req && (
+              <span className={`text-xs leading-tight ${statusColor(req)}`}>
+                {statusText(req)}
+              </span>
+            )}
+          </div>
+        </button>
+      </li>
+    )
+  }
 
   return (
     <div className="mx-auto flex min-h-0 w-full flex-1 flex-col p-4">
@@ -173,7 +237,7 @@ export function SharePage({
 
           <div className="ws-scroll min-h-0 flex-1 overflow-y-auto pb-6 mb-[6px]">
 
-          {connection === 'open' && peers.length === 0 && (
+          {connection === 'open' && peers.length === 0 && codePeers.length === 0 && (
             <div className="flex items-center justify-center py-8">
               <EmptyState
                 title="No one's here yet"
@@ -186,70 +250,29 @@ export function SharePage({
             </div>
           )}
 
-          {view === 'list' && (
-            <ul className="mt-2">
-              {peers.map((peer) => {
-                const req = outgoingByPeer[peer.id]
-                const isPulsing = req?.status === 'waiting'
-                return (
-                  <li
-                    key={peer.id}
-                    className="relative [&:not(:first-child)]:before:absolute [&:not(:first-child)]:before:content-[''] [&:not(:first-child)]:before:top-0 [&:not(:first-child)]:before:right-0 [&:not(:first-child)]:before:left-[var(--sep-left)] [&:not(:first-child)]:before:h-px [&:not(:first-child)]:before:bg-[var(--line-strong)]"
-                    style={{ '--sep-left': `${4 + LIST_ICON_PX[listIconSize] + 12}px` } as React.CSSProperties}
-                  >
-                    <button
-                      onClick={() => req?.status === 'waiting' ? onWithdraw(req.reqId, peer.id) : onPick(peer)}
-                      className="flex w-full cursor-pointer items-center gap-3 px-1 py-2.5"
-                    >
-                      <span className={`shrink-0 ${isPulsing ? 'animate-avatar-pulse' : ''}`}>
-                        <PeerAvatar pfp={peer.pfp} device={peer.device} name={peer.name} size={LIST_ICON_PX[listIconSize]} />
-                      </span>
-                      <div className="min-w-0 flex-1 text-left">
-                        <p className="truncate text-sm font-semibold text-[var(--ink)]">{peer.name}</p>
-                        <p className={`text-xs ${req ? (req.status === 'accepted' ? 'text-[var(--success)]' : req.status === 'declined' ? 'text-[var(--error)]' : req.status === 'withdrawn' ? 'text-[var(--warning)]' : 'text-[var(--muted)]') : 'text-[var(--muted)]'}`}>
-                          {req ? (req.status === 'waiting' ? 'Waiting…' : req.status === 'accepted' ? 'Sent' : req.status === 'withdrawn' ? 'Withdrawn' : 'Declined') : DEVICE_LABEL[peer.device]}
-                        </p>
-                      </div>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
+          {/* people who entered our share code sit in their own section on top */}
+          {codePeers.length > 0 && (
+            <div className="mt-2">
+              <p className="px-1 pb-1 text-xs font-bold text-[var(--muted)]">People from Share Code</p>
+              {view === 'list' ? (
+                <ul>{codePeers.map(listItem)}</ul>
+              ) : (
+                <ul className="grid gap-3" style={{ gridTemplateColumns: `repeat(${perRow}, minmax(0, 1fr))` }}>
+                  {codePeers.map(iconItem)}
+                </ul>
+              )}
+              <div className="mt-3 h-px bg-[var(--line-strong)]" />
+            </div>
           )}
+
+          {view === 'list' && <ul className="mt-2">{peers.map(listItem)}</ul>}
 
           {view === 'icons' && (
             <ul
               className="mt-2 grid gap-3"
               style={{ gridTemplateColumns: `repeat(${perRow}, minmax(0, 1fr))` }}
             >
-              {peers.map((peer) => {
-                const req = outgoingByPeer[peer.id]
-                const isPulsing = req?.status === 'waiting'
-                return (
-                  <li key={peer.id}>
-                    <button
-                      onClick={() => req?.status === 'waiting' ? onWithdraw(req.reqId, peer.id) : onPick(peer)}
-                      className="flex w-full cursor-pointer flex-col items-center gap-1 rounded-[var(--radius-sm)] p-2"
-                    >
-                      <span
-                        className={`block aspect-square w-full overflow-hidden rounded-full ${isPulsing ? 'animate-avatar-pulse' : ''}`}
-                      >
-                        <PeerAvatar pfp={peer.pfp} device={peer.device} name={peer.name} className="h-full w-full" />
-                      </span>
-                      <div className="flex w-full flex-col items-center">
-                        <span className="w-full truncate px-1 text-center text-xs font-semibold text-[var(--ink)]">
-                          {peer.name}
-                        </span>
-                        {req && (
-                          <span className={`text-xs leading-tight ${req.status === 'accepted' ? 'text-[var(--success)]' : req.status === 'declined' ? 'text-[var(--error)]' : req.status === 'withdrawn' ? 'text-[var(--warning)]' : 'text-[var(--muted)]'}`}>
-                            {req.status === 'waiting' ? 'Waiting…' : req.status === 'accepted' ? 'Sent' : req.status === 'withdrawn' ? 'Withdrawn' : 'Declined'}
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  </li>
-                )
-              })}
+              {peers.map(iconItem)}
             </ul>
           )}
           </div>{/* end scroll container */}

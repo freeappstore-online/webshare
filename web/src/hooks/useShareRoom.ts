@@ -33,7 +33,9 @@ export type CodeRole = 'send' | 'receive'
  */
 export function useShareRoom(profile: Profile, discoverable: boolean) {
   const [connection, setConnection] = useState<SignalState>('connecting')
+  // two rosters: same-network people, and people who entered our share code
   const [peers, setPeers] = useState<PeerInfo[]>([])
+  const [codePeers, setCodePeers] = useState<PeerInfo[]>([])
   // requests queue up instead of overwriting each other; the head is on screen
   const [incomingQueue, setIncomingQueue] = useState<IncomingRequest[]>([])
   const [outgoing, setOutgoing] = useState<OutgoingRequest[]>([])
@@ -58,16 +60,14 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
   const peerSourceRef = useRef(new Map<string, SignalClient>())
 
   const mergePeers = useCallback(() => {
-    const seen = new Set<string>()
-    const merged = [...codePeersRef.current, ...ipPeersRef.current].filter((p) => {
-      // the same person can sit in both rooms (on our Wi-Fi *and* typed the
-      // code) — show them once, preferring the code-room entry
-      const key = `${p.name}|${p.device}|${p.pfp ?? ''}`
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-    setPeers(merged.sort((a, b) => a.name.localeCompare(b.name)))
+    const byName = (a: PeerInfo, b: PeerInfo) => a.name.localeCompare(b.name)
+    // the same person can sit in both rooms (on our Wi-Fi *and* typed the
+    // code) — show them only in the share-code section
+    const inCode = new Set(codePeersRef.current.map((p) => `${p.name}|${p.device}|${p.pfp ?? ''}`))
+    setCodePeers([...codePeersRef.current].sort(byName))
+    setPeers(
+      ipPeersRef.current.filter((p) => !inCode.has(`${p.name}|${p.device}|${p.pfp ?? ''}`)).sort(byName)
+    )
   }, [])
 
   const handleMessage = useCallback((client: SignalClient, from: string, data: unknown) => {
@@ -245,5 +245,5 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
   const roomCode = codeSession?.code ?? null
   const codeRole = codeSession?.role ?? null
 
-  return { connection, peers, incoming, outgoing, roomCode, codeRole, autoAccepted, joinRoom, leaveRoom, sendShareRequest, withdrawShareRequest, respondToShare, clearOutgoing, dismissIncoming }
+  return { connection, peers, codePeers, incoming, outgoing, roomCode, codeRole, autoAccepted, joinRoom, leaveRoom, sendShareRequest, withdrawShareRequest, respondToShare, clearOutgoing, dismissIncoming }
 }

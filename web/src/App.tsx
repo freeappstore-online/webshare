@@ -582,6 +582,7 @@ function Main({
           onPerRowChange={onSharePerRowChange}
           onListIconSizeChange={onShareListIconSizeChange}
           peers={room.peers}
+          codePeers={room.codePeers}
           connection={room.connection}
           outgoing={room.outgoing}
           shareCode={room.codeRole === 'send' ? room.roomCode : null}
