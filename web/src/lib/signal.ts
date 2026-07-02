@@ -104,16 +104,18 @@ export class SignalClient {
 
   /** Stop announcing — bounces the socket so the server drops us from the roster. */
   clearHello(): void {
+    if (!this.hello) return // nothing announced — don't bounce a fresh socket for no reason
     this.hello = null
     this.attempt = 0
     this.quickReconnect = true  // reconnect instantly so we rejoin and get current roster
     this.socket?.close()
   }
 
-  sendTo(to: string, data: unknown): void {
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({ t: 'msg', to, data }))
-    }
+  /** Relay `data` to peer `to`. Returns false when the socket isn't open (message would be lost). */
+  sendTo(to: string, data: unknown): boolean {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false
+    this.socket.send(JSON.stringify({ t: 'msg', to, data }))
+    return true
   }
 
   close(): void {

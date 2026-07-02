@@ -55,8 +55,10 @@ export default function App() {
         reset()
         setPreference('system')
         setFiles([])
+        setFilesToShare([])
         fileQueue.current = []
         setPage('files')
+        setDiscoverable(false)
         localStorage.removeItem('webshare:view')
         localStorage.removeItem('webshare:perRow')
         localStorage.removeItem('webshare:listIconSize')

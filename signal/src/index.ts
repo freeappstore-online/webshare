@@ -121,14 +121,30 @@ export class RoomDO {
   }
 }
 
+/**
+ * Same public IP = same local network — except IPv6, where every device gets
+ * its own address. There the network is the /64 prefix, so group by that or
+ * peers sitting next to each other would never meet.
+ */
+function networkKey(ip: string): string {
+  if (!ip.includes(':')) return ip
+  const [head, tail = ''] = ip.split('::')
+  const parts = head ? head.split(':') : []
+  if (parts.length < 4) {
+    const tailParts = tail ? tail.split(':') : []
+    parts.push(...Array(Math.max(8 - parts.length - tailParts.length, 0)).fill('0'), ...tailParts)
+  }
+  return parts.slice(0, 4).join(':')
+}
+
 export default {
   fetch(request: Request, env: Env): Response | Promise<Response> {
     const url = new URL(request.url)
     if (url.pathname === '/ws') {
-      // Same public IP = same local network. `?room=` overrides for manual
-      // room codes (e.g. when carrier NAT splits people who are together).
+      // `?room=` overrides for manual room codes (e.g. when carrier NAT
+      // splits people who are together).
       const ip = request.headers.get('CF-Connecting-IP') ?? 'dev'
-      const room = url.searchParams.get('room')?.slice(0, 64) || `ip:${ip}`
+      const room = url.searchParams.get('room')?.slice(0, 64) || `ip:${networkKey(ip)}`
       return env.ROOMS.get(env.ROOMS.idFromName(room)).fetch(request)
     }
     return new Response('webshare signaling server — connect via /ws\n', {
