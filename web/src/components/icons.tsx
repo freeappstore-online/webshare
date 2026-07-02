@@ -452,6 +452,26 @@ export function UploadIcon(props: IconProps) {
   )
 }
 
+export function DownloadIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 4v12m0 0 -4.5-4.5M12 16l4.5-4.5" />
+      <path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+    </Svg>
+  )
+}
+
+export function QrCodeIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <path d="M14 14h3v3h-3zM21 14v.5M14 20.5V21h.5M17.5 21H21v-3.5" />
+    </Svg>
+  )
+}
+
 export function FolderIcon({ size = 20, className }: IconProps) {
   const id = useId()
   return (

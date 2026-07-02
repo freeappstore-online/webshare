@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { useTheme } from '@freeappstore/sdk/hooks'
 import { BuildInfo, Footer } from '@freeappstore/sdk/ui'
 import { ThemeButton } from './components/ThemeButton'
@@ -8,10 +8,13 @@ import { IncomingShare } from './components/IncomingShare'
 import { Dropdown } from './components/Dropdown'
 import { CloseIcon, FolderToFilesIcon, TriangleInfoIcon, UploadIcon, ViewIconsIcon, ViewListIcon, WebshareLogo } from './components/icons'
 import { ProfileForm } from './components/ProfileForm'
+import { ReceiveWindow } from './components/ReceiveWindow'
+import { ShareCodeWindow } from './components/ShareCodeWindow'
 import { useProfile } from './hooks/useProfile'
 import { withThemeFade } from './lib/themeFade'
 import { useShareRoom } from './hooks/useShareRoom'
 import { mergeFiles, readEntry, toFileMeta } from './lib/files'
+import { generateShareCode, isShareCode } from './lib/shareCode'
 import { FilesPage } from './pages/FilesPage'
 import { SharePage } from './pages/SharePage'
 import type { PeerInfo, Profile } from './types'
@@ -81,6 +84,14 @@ export default function App() {
   // the hidden file input itself renders inside FilesPage
   const [page, setPage] = useState<'files' | 'share'>('files')
   const [discoverable, setDiscoverable] = useState(false)
+
+  // ?code=XXXXXX from a scanned QR: consume it once and clean the URL, then
+  // auto-join as receiver as soon as a profile exists (Main handles the join)
+  const [pendingCode, setPendingCode] = useState<string | null>(() => {
+    const code = new URLSearchParams(location.search).get('code')
+    if (code !== null) history.replaceState(null, '', location.pathname)
+    return code && isShareCode(code) ? code : null
+  })
 
   const [shareView, setShareView] = useState<ViewMode>(() => {
     const s = localStorage.getItem(SHARE_VIEW_KEY)
@@ -410,6 +421,8 @@ export default function App() {
           onShareListIconSizeChange={pickShareListIconSize}
           discoverable={discoverable}
           onDiscoverableChange={setDiscoverable}
+          pendingCode={pendingCode}
+          onPendingCodeConsumed={() => setPendingCode(null)}
         />
       )}
 
@@ -473,6 +486,8 @@ function Main({
   onShareListIconSizeChange,
   discoverable,
   onDiscoverableChange,
+  pendingCode,
+  onPendingCodeConsumed,
 }: {
   profile: Profile
   animation: string
@@ -496,8 +511,39 @@ function Main({
   onShareListIconSizeChange: (s: ListIconSize) => void
   discoverable: boolean
   onDiscoverableChange: (v: boolean) => void
+  pendingCode: string | null
+  onPendingCodeConsumed: () => void
 }) {
+  const [receiveOpen, setReceiveOpen] = useState(false)
+  const [shareCodeOpen, setShareCodeOpen] = useState(false)
+
   const room = useShareRoom(profile, discoverable)
+
+  // stable: it feeds the QR-scanner effect in ReceiveWindow, and a fresh
+  // callback every render would restart the camera stream
+  const { joinRoom, roomCode } = room
+  const joinAsReceiver = useCallback((code: string) => joinRoom(code, 'receive'), [joinRoom])
+
+  // senders host a code for the whole session once the share page is opened —
+  // it rides on a second connection, so LAN discovery keeps working alongside
+  useEffect(() => {
+    if (page === 'share' && !roomCode) joinRoom(generateShareCode(), 'send')
+  }, [page, roomCode, joinRoom])
+
+  // QR deep link: land straight in the sender's room, waiting
+  useEffect(() => {
+    if (!pendingCode) return
+    onPendingCodeConsumed()
+    joinAsReceiver(pendingCode)
+    setReceiveOpen(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingCode])
+
+  // a share request arrived — get the receive window out of the way (but stay
+  // in the room: the response, and later the transfer, travel through it)
+  useEffect(() => {
+    if (room.incoming) setReceiveOpen(false)
+  }, [room.incoming])
 
   const pickRecipient = (peer: PeerInfo) => {
     room.sendShareRequest(peer, filesToShare.map(toFileMeta))
@@ -518,6 +564,7 @@ function Main({
           onShare={(f) => { setFilesToShare(f); setPage('share') }}
           onEditProfile={onEditProfile}
           onOpenAddPicker={onOpenAddPicker}
+          onReceive={() => setReceiveOpen(true)}
           inputRef={fileInput}
           folderInputRef={folderInput}
           dragOver={dragOver}
@@ -537,11 +584,26 @@ function Main({
           peers={room.peers}
           connection={room.connection}
           outgoing={room.outgoing}
+          shareCode={room.codeRole === 'send' ? room.roomCode : null}
+          onShowCode={() => setShareCodeOpen(true)}
           onPick={pickRecipient}
           onWithdraw={room.withdrawShareRequest}
           onBack={() => setPage('files')}
         />
       )}
+      <ReceiveWindow
+        open={receiveOpen}
+        joinedCode={room.codeRole === 'receive' ? room.roomCode : null}
+        accepted={room.autoAccepted}
+        onJoin={joinAsReceiver}
+        onLeave={room.leaveRoom}
+        onClose={() => setReceiveOpen(false)}
+      />
+      <ShareCodeWindow
+        open={shareCodeOpen}
+        code={room.codeRole === 'send' ? room.roomCode : null}
+        onClose={() => setShareCodeOpen(false)}
+      />
       <IncomingShare request={room.incoming} onRespond={room.respondToShare} onDismiss={room.dismissIncoming} />
     </div>
   )

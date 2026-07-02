@@ -1,7 +1,8 @@
 import { EmptyState } from '@freeappstore/sdk/ui'
 import { Dropdown } from '../components/Dropdown'
 import { PeerAvatar } from '../components/PeerAvatar'
-import { ViewIconsIcon, ViewListIcon } from '../components/icons'
+import { QrImage } from '../components/QrImage'
+import { QrCodeIcon, ViewIconsIcon, ViewListIcon } from '../components/icons'
 import { DEVICE_LABEL } from '../lib/device'
 import type { SignalState } from '../lib/signal'
 import type { OutgoingRequest, PeerInfo, Profile } from '../types'
@@ -27,6 +28,9 @@ interface SharePageProps {
   peers: PeerInfo[]
   connection: SignalState
   outgoing: OutgoingRequest[]
+  /** active share code when this sender is hosting one */
+  shareCode: string | null
+  onShowCode: () => void
   onPick: (peer: PeerInfo) => void
   onWithdraw: (reqId: string, toId: string) => void
   onBack: () => void
@@ -44,6 +48,8 @@ export function SharePage({
   peers,
   connection,
   outgoing,
+  shareCode,
+  onShowCode,
   onPick,
   onWithdraw,
   onBack,
@@ -70,6 +76,30 @@ export function SharePage({
           >
             {profile.name}
           </p>
+          {shareCode && (
+            <>
+              {/* desktop: code + QR live under the profile */}
+              <div className="hidden min-[680px]:flex mt-1 flex-col items-center gap-2">
+                {/* pl matches the tracking so the trailing letter-space doesn't skew centering */}
+                <p className="pl-[0.25em] text-2xl font-bold tracking-[0.25em] text-[var(--ink)]">{shareCode}</p>
+                <QrImage
+                  code={shareCode}
+                  className="w-40 rounded-[var(--radius-sm)] border border-[var(--line-strong)] bg-white p-2"
+                />
+                <p className="max-w-44 text-center text-xs text-[var(--muted)]">
+                  Not on your Wi-Fi? They can enter this code under “Receive files…”
+                </p>
+              </div>
+              {/* mobile: compact button, same style as the profile Edit button */}
+              <button
+                onClick={onShowCode}
+                className="min-[680px]:hidden -mt-0.5 flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-sm)] px-3 py-1.5 text-sm font-semibold text-[var(--muted)] transition-colors hover:bg-[var(--line-strong)] hover:text-[var(--ink)]"
+              >
+                <QrCodeIcon size={15} />
+                Share via Share Code
+              </button>
+            </>
+          )}
         </div>
 
         {/* middle column — recipient picker */}
@@ -147,7 +177,11 @@ export function SharePage({
             <div className="flex items-center justify-center py-8">
               <EmptyState
                 title="No one's here yet"
-                message="Ask the other person to open Webshare on the same Wi-Fi and switch discoverable on — they'll show up here. No sign-up needed."
+                message={
+                  shareCode
+                    ? `Ask the other person to switch discoverable on (same Wi-Fi), or to enter code ${shareCode} under "Receive files…" — they'll show up here.`
+                    : 'Ask the other person to open Webshare on the same Wi-Fi and switch discoverable on — they\'ll show up here. No sign-up needed.'
+                }
               />
             </div>
           )}

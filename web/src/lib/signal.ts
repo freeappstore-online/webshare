@@ -40,19 +40,25 @@ export class SignalClient {
   private readonly url: string
   private socket: WebSocket | null = null
   private hello: Hello | null = null
+  private readonly room: string | null
   private explicitlyClosed = false
   private attempt = 0
   private timer: ReturnType<typeof setTimeout> | undefined
   private quickReconnect = false
 
-  constructor(url: string) {
+  /** `room` pins this connection to a named room (share code) instead of the IP room. */
+  constructor(url: string, room?: string) {
     this.url = url
+    this.room = room ?? null
   }
 
   connect(): void {
     if (this.explicitlyClosed) return
+    // already connecting/connected — a second socket would shadow this one
+    if (this.socket && this.socket.readyState !== WebSocket.CLOSING && this.socket.readyState !== WebSocket.CLOSED) return
     this.onState('connecting')
-    const socket = new WebSocket(this.url)
+    const url = this.room ? `${this.url}?room=${encodeURIComponent(this.room)}` : this.url
+    const socket = new WebSocket(url)
     this.socket = socket
 
     socket.addEventListener('open', () => {

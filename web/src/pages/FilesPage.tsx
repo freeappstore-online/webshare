@@ -4,6 +4,7 @@ import { FinderFileName, ListFileName } from '../components/FileNames'
 import {
   AudioSquareIcon,
   CheckIcon,
+  DownloadIcon,
   EditIcon,
   FolderIcon,
   PaperIcon,
@@ -24,6 +25,8 @@ interface FilesPageProps {
   onShare: (filesToShare: File[]) => void
   onEditProfile: () => void
   onOpenAddPicker: () => void
+  /** opens the receive-files (share code) window */
+  onReceive: () => void
   /** owned by App so the nav bar's add-files button can open the picker */
   inputRef: RefObject<HTMLInputElement | null>
   /** owned by App so the nav bar's add-folder button can open the picker */
@@ -49,7 +52,7 @@ const VIEWS: Array<{ key: ViewMode; label: string; Icon: typeof ViewListIcon }> 
 ]
 
 /** Main page: who you are, stage files to share, then pick a recipient. */
-export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, onEditProfile, onOpenAddPicker, inputRef: input, folderInputRef: folderInput, dragOver, discoverable, onDiscoverableChange }: FilesPageProps) {
+export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, onEditProfile, onOpenAddPicker, onReceive, inputRef: input, folderInputRef: folderInput, dragOver, discoverable, onDiscoverableChange }: FilesPageProps) {
   const [view, setView] = useState<ViewMode>(() => {
     const stored = localStorage.getItem(VIEW_KEY)
     return stored === 'icons' || stored === 'list' ? stored : 'icons'
@@ -320,6 +323,18 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
           <UploadIcon size={26} />
           <span className="text-sm font-semibold text-[var(--ink)]">Add files…</span>
           <span className="text-xs">or drag &amp; drop here</span>
+        </button>
+      )}
+
+      {!hasFiles && (
+        <button
+          onClick={onReceive}
+          className="mt-3 flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-[1.25rem] border-2 border-dashed p-6 text-[var(--muted)] transition-none"
+          style={{ borderColor: 'var(--line-strong)', background: 'var(--paper-deep)' }}
+        >
+          <DownloadIcon size={26} />
+          <span className="text-sm font-semibold text-[var(--ink)]">Receive files…</span>
+          <span className="text-xs">with a share code from the sender</span>
         </button>
       )}
 
