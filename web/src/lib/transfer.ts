@@ -19,6 +19,7 @@
  *   either → { t:'abort' }
  */
 
+import { TransferDiag, storeReport } from './diagnostics'
 import type { SaveTarget, FileSink } from './saveTarget'
 
 /** Safe floor for a single data-channel message across implementations. */
@@ -73,6 +74,8 @@ export interface TransferHandlers {
   onError(message: string): void
   /** Remote side aborted — distinct from an error so the UI can say so. */
   onRemoteCancel(): void
+  /** Copy-pasteable timing/path report, once the transfer has settled. */
+  onReport?(text: string): void
 }
 
 export class Transfer {
@@ -109,6 +112,8 @@ export class Transfer {
   private pending: ArrayBuffer[] = []
   private pendingBytes = 0
   private lastEmit = 0
+  private readonly diag: TransferDiag
+  private sawFirstByte = false
 
   private stats: TransferStats = {
     bytesDone: 0,
@@ -130,6 +135,7 @@ export class Transfer {
     this.files = opts.files ?? []
     this.target = opts.target ?? null
     this.handlers = opts.handlers
+    this.diag = new TransferDiag(this.role)
 
     if (this.role === 'sender') {
       this.stats.filesTotal = this.files.length
@@ -144,6 +150,7 @@ export class Transfer {
   // --- setup ---------------------------------------------------------------
 
   start(): void {
+    this.diag.mark('start')
     let pc: RTCPeerConnection
     try {
       pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
@@ -171,6 +178,7 @@ export class Transfer {
         try {
           const offer = await pc.createOffer()
           await pc.setLocalDescription(offer)
+          this.diag.mark('offer-sent')
           this.handlers.onSignal({ t: 'rtc-offer', reqId: this.reqId, sdp: offer.sdp ?? '' })
         } catch {
           this.fail(UNREACHABLE)
@@ -194,6 +202,9 @@ export class Transfer {
 
     const onOpen = () => {
       clearTimeout(this.connectTimer)
+      this.diag.mark('channel-open')
+      this.diag.noteChunk(this.chunkSize(), this.pc?.sctp?.maxMessageSize ?? 0)
+      this.diag.startSampling(this.pc, channel, () => this.stats.bytesDone)
       if (this.role === 'sender') void this.pump()
     }
     // Chrome hands the receiver a channel that is *already* open, so a plain
@@ -220,6 +231,7 @@ export class Transfer {
       await this.flushIce()
       const answer = await this.pc.createAnswer()
       await this.pc.setLocalDescription(answer)
+      this.diag.mark('answer-sent')
       this.handlers.onSignal({ t: 'rtc-answer', reqId: this.reqId, sdp: answer.sdp ?? '' })
     } catch {
       this.fail(UNREACHABLE)
@@ -230,6 +242,7 @@ export class Transfer {
     if (!this.pc) return
     try {
       await this.pc.setRemoteDescription({ type: 'answer', sdp })
+      this.diag.mark('answer-applied')
       await this.flushIce()
     } catch {
       this.fail(UNREACHABLE)
@@ -304,6 +317,7 @@ export class Transfer {
             if (stale()) return
             const end = Math.min(p + chunk, block.byteLength)
             channel.send(block.slice(p, end))
+            if (!this.sawFirstByte) { this.sawFirstByte = true; this.diag.mark('first-byte') }
             this.stats.bytesDone += end - p
             this.emit()
           }
@@ -364,6 +378,7 @@ export class Transfer {
 
   private async handleChunk(buf: ArrayBuffer): Promise<void> {
     if (this.aborted || this.finished) return
+    if (!this.sawFirstByte) { this.sawFirstByte = true; this.diag.mark('first-byte') }
     // count on arrival: progress should track the transfer, not the disk
     this.stats.bytesDone += buf.byteLength
     this.emit()
@@ -411,6 +426,7 @@ export class Transfer {
     if (this.finished || this.aborted) return
     this.finished = true
     clearTimeout(this.connectTimer)
+    this.publishReport('completed')
     this.stats.currentName = null
     this.emit(true)
     this.handlers.onDone()
@@ -435,6 +451,7 @@ export class Transfer {
   private fail(message: string): void {
     if (this.finished || this.aborted) return
     this.aborted = true
+    this.publishReport(`failed: ${message}`)
     this.cleanupPartial()
     this.teardown()
     this.handlers.onError(message)
@@ -450,6 +467,7 @@ export class Transfer {
       /* channel already gone */
     }
     this.handlers.onSignal({ t: 'xfer-abort', reqId: this.reqId })
+    this.publishReport('cancelled here')
     this.cleanupPartial()
     this.teardown()
   }
@@ -467,9 +485,20 @@ export class Transfer {
     if (this.aborted) return
     this.finished = false
     this.aborted = true
+    this.publishReport('cancelled by peer')
     this.cleanupPartial()
     this.teardown()
     this.handlers.onRemoteCancel()
+  }
+
+  private publishReport(outcome: string): void {
+    this.diag.mark(outcome.startsWith('completed') ? 'done' : 'error')
+    this.diag.stop()
+    const text = this.diag.report(outcome, this.stats.bytesDone)
+    storeReport(text)
+    // always in the console too, so it survives the window being dismissed
+    console.info(`[webshare]\n${text}`)
+    this.handlers.onReport?.(text)
   }
 
   private cleanupPartial(): void {

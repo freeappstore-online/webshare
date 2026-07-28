@@ -115,6 +115,7 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
               state: 'cancelled',
               error: `${peer.name} cancelled the transfer`,
             }),
+          onReport: (report) => patchTransfer(reqId, { report }),
         },
       })
 
@@ -130,6 +131,7 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
           state: 'connecting',
           savedTo: null,
           error: null,
+          report: null,
           startedAt: Date.now(),
           ...transfer.progress,
         },

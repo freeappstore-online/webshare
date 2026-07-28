@@ -74,5 +74,7 @@ export interface TransferProgress {
   /** where the files landed — shown on completion (receiver only) */
   savedTo: string | null
   error: string | null
+  /** copy-pasteable timing/path report, filled in once the transfer settles */
+  report: string | null
   startedAt: number
 }

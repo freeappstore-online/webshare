@@ -15,6 +15,7 @@ import { useProfile } from './hooks/useProfile'
 import { withThemeFade } from './lib/themeFade'
 import { useShareRoom } from './hooks/useShareRoom'
 import { mergeFiles, readEntry } from './lib/files'
+import { loadReport } from './lib/diagnostics'
 import { generateShareCode, isShareCode } from './lib/shareCode'
 import { FilesPage } from './pages/FilesPage'
 import { SharePage } from './pages/SharePage'
@@ -47,6 +48,13 @@ export default function App() {
   // the welcome window can fade in on a clean page
   const [resetting, setResetting] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
+  // last transfer's speed report — survives the transfer window closing, and is
+  // the only way to read it on a phone, where there's no console
+  const [report, setReport] = useState<string | null>(null)
+  const [reportCopied, setReportCopied] = useState(false)
+  useEffect(() => {
+    if (aboutOpen) { setReport(loadReport()); setReportCopied(false) }
+  }, [aboutOpen])
   const { setPreference } = useTheme()
 
   const handleReset = () => {
@@ -371,6 +379,25 @@ export default function App() {
               FreeAppStore
             </a>
           </p>
+          {report && (
+            <div className="w-full">
+              <div className="h-px w-full bg-[var(--line-strong)]" />
+              <button
+                onClick={() => {
+                  void navigator.clipboard?.writeText(report).then(() => setReportCopied(true), () => {})
+                }}
+                className="mt-3 cursor-pointer text-xs font-semibold text-[var(--muted)] underline"
+              >
+                {reportCopied ? 'Copied ✓' : 'Copy last transfer report'}
+              </button>
+              <pre
+                className="ws-scroll mt-2 max-h-48 w-full overflow-auto rounded-[var(--radius-sm)] p-2 text-left text-[10px] leading-tight text-[var(--ink)]"
+                style={{ background: 'var(--paper-deep)', border: '1px solid var(--line-strong)' }}
+              >
+                {report}
+              </pre>
+            </div>
+          )}
           <button
             onClick={() => setAboutOpen(false)}
             aria-label="Close about"

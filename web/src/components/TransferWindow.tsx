@@ -58,6 +58,9 @@ function useTransferRate(bytesDone: number, running: boolean, reqId: string | un
 export function TransferWindow({ transfer, onCancel, onDismiss }: TransferWindowProps) {
   const running = transfer?.state === 'connecting' || transfer?.state === 'transferring'
   const speed = useTransferRate(transfer?.bytesDone ?? 0, running, transfer?.reqId)
+  const [copied, setCopied] = useState(false)
+  const [showReport, setShowReport] = useState(false)
+  useEffect(() => { setCopied(false); setShowReport(false) }, [transfer?.reqId])
 
   // FloatingWindow keeps the last children on screen for the exit animation,
   // so the null case still has to render the window itself
@@ -141,6 +144,39 @@ export function TransferWindow({ transfer, onCancel, onDismiss }: TransferWindow
           </p>
 
         </div>
+
+        {/* a phone has no console, so the report has to be reachable here */}
+        {!running && transfer.report && (
+          <div className="w-full">
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={() => {
+                  void navigator.clipboard?.writeText(transfer.report!).then(
+                    () => setCopied(true),
+                    () => setShowReport(true),
+                  )
+                }}
+                className="cursor-pointer text-xs font-semibold text-[var(--muted)] underline"
+              >
+                {copied ? 'Copied ✓' : 'Copy speed report'}
+              </button>
+              <button
+                onClick={() => setShowReport((v) => !v)}
+                className="cursor-pointer text-xs font-semibold text-[var(--muted)] underline"
+              >
+                {showReport ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            {showReport && (
+              <pre
+                className="ws-scroll mt-2 max-h-56 w-full overflow-auto rounded-[var(--radius-sm)] p-2 text-left text-[10px] leading-tight text-[var(--ink)]"
+                style={{ background: 'var(--paper-deep)', border: '1px solid var(--line-strong)' }}
+              >
+                {transfer.report}
+              </pre>
+            )}
+          </div>
+        )}
 
         {running ? (
           <button
