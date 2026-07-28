@@ -128,6 +128,7 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
         {
           reqId,
           dir,
+          peerId: peer.id,
           peerName: peer.name,
           peerPfp: peer.pfp,
           state: 'connecting',

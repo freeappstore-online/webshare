@@ -2,10 +2,11 @@ import { EmptyState } from '@freeappstore/sdk/ui'
 import { Dropdown } from '../components/Dropdown'
 import { PeerAvatar } from '../components/PeerAvatar'
 import { QrImage } from '../components/QrImage'
+import { TransferRing, transferColor, transferLabel } from '../components/TransferRing'
 import { QrCodeIcon, ViewIconsIcon, ViewListIcon } from '../components/icons'
 import { DEVICE_LABEL } from '../lib/device'
 import type { SignalState } from '../lib/signal'
-import type { OutgoingRequest, PeerInfo, Profile } from '../types'
+import type { OutgoingRequest, PeerInfo, Profile, TransferProgress } from '../types'
 
 type ViewMode = 'icons' | 'list'
 type ListIconSize = 'small' | 'medium' | 'big'
@@ -30,11 +31,14 @@ interface SharePageProps {
   codePeers: PeerInfo[]
   connection: SignalState
   outgoing: OutgoingRequest[]
+  /** transfers we're sending — drawn as a ring around the recipient */
+  transfers: TransferProgress[]
   /** active share code when this sender is hosting one */
   shareCode: string | null
   onShowCode: () => void
   onPick: (peer: PeerInfo) => void
   onWithdraw: (reqId: string, toId: string) => void
+  onCancelTransfer: (reqId: string) => void
   onBack: () => void
 }
 
@@ -51,24 +55,50 @@ export function SharePage({
   codePeers,
   connection,
   outgoing,
+  transfers,
   shareCode,
   onShowCode,
   onPick,
   onWithdraw,
+  onCancelTransfer,
   onBack,
 }: SharePageProps) {
   // map toId → most recent outgoing request for that peer
   const outgoingByPeer: Record<string, OutgoingRequest> = {}
   for (const o of outgoing) outgoingByPeer[o.toId] = o
+  // …and likewise the live transfer, which supersedes the request status
+  const transferByPeer: Record<string, TransferProgress> = {}
+  for (const t of transfers) transferByPeer[t.peerId] = t
 
   const statusColor = (req: OutgoingRequest) =>
     req.status === 'accepted' ? 'text-[var(--success)]' : req.status === 'declined' ? 'text-[var(--error)]' : req.status === 'withdrawn' ? 'text-[var(--warning)]' : 'text-[var(--muted)]'
   const statusText = (req: OutgoingRequest) =>
     req.status === 'waiting' ? 'Waiting…' : req.status === 'accepted' ? 'Sent' : req.status === 'withdrawn' ? 'Withdrawn' : 'Declined'
 
+  /** Tapping a peer means whatever is most useful right now. */
+  const activate = (peer: PeerInfo) => {
+    const t = transferByPeer[peer.id]
+    if (t && (t.state === 'connecting' || t.state === 'transferring')) return onCancelTransfer(t.reqId)
+    const req = outgoingByPeer[peer.id]
+    if (req?.status === 'waiting') return onWithdraw(req.reqId, peer.id)
+    onPick(peer)
+  }
+
+  /** Name line: a running transfer wins, otherwise the request status. */
+  const subtitle = (peer: PeerInfo) => {
+    const t = transferByPeer[peer.id]
+    if (t) return { text: transferLabel(t), color: transferColor(t) }
+    const req = outgoingByPeer[peer.id]
+    if (req) return { text: statusText(req), color: statusColor(req) }
+    return { text: DEVICE_LABEL[peer.device], color: 'text-[var(--muted)]' }
+  }
+
   const listItem = (peer: PeerInfo) => {
     const req = outgoingByPeer[peer.id]
-    const isPulsing = req?.status === 'waiting'
+    const transfer = transferByPeer[peer.id] ?? null
+    // the pulse is for "waiting on them"; once bytes move the ring takes over
+    const isPulsing = req?.status === 'waiting' && !transfer
+    const line = subtitle(peer)
     return (
       <li
         key={peer.id}
@@ -76,17 +106,20 @@ export function SharePage({
         style={{ '--sep-left': `${4 + LIST_ICON_PX[listIconSize] + 12}px` } as React.CSSProperties}
       >
         <button
-          onClick={() => req?.status === 'waiting' ? onWithdraw(req.reqId, peer.id) : onPick(peer)}
+          onClick={() => activate(peer)}
           className="flex w-full cursor-pointer items-center gap-3 px-1 py-2.5"
         >
-          <span className={`shrink-0 ${isPulsing ? 'animate-avatar-pulse' : ''}`}>
-            <PeerAvatar pfp={peer.pfp} device={peer.device} name={peer.name} size={LIST_ICON_PX[listIconSize]} />
+          <span
+            className={`block shrink-0 ${isPulsing ? 'animate-avatar-pulse' : ''}`}
+            style={{ width: LIST_ICON_PX[listIconSize], height: LIST_ICON_PX[listIconSize] }}
+          >
+            <TransferRing transfer={transfer}>
+              <PeerAvatar pfp={peer.pfp} device={peer.device} name={peer.name} className="h-full w-full" />
+            </TransferRing>
           </span>
           <div className="min-w-0 flex-1 text-left">
             <p className="truncate text-sm font-semibold text-[var(--ink)]">{peer.name}</p>
-            <p className={`text-xs ${req ? statusColor(req) : 'text-[var(--muted)]'}`}>
-              {req ? statusText(req) : DEVICE_LABEL[peer.device]}
-            </p>
+            <p className={`truncate text-xs ${line.color}`}>{line.text}</p>
           </div>
         </button>
       </li>
@@ -95,25 +128,30 @@ export function SharePage({
 
   const iconItem = (peer: PeerInfo) => {
     const req = outgoingByPeer[peer.id]
-    const isPulsing = req?.status === 'waiting'
+    const transfer = transferByPeer[peer.id] ?? null
+    const isPulsing = req?.status === 'waiting' && !transfer
+    const line = subtitle(peer)
     return (
       <li key={peer.id}>
         <button
-          onClick={() => req?.status === 'waiting' ? onWithdraw(req.reqId, peer.id) : onPick(peer)}
+          onClick={() => activate(peer)}
           className="flex w-full cursor-pointer flex-col items-center gap-1 rounded-[var(--radius-sm)] p-2"
         >
           <span
-            className={`block aspect-square w-full overflow-hidden rounded-full ${isPulsing ? 'animate-avatar-pulse' : ''}`}
+            // no overflow clip: the ring is drawn outside the avatar's circle
+            className={`block aspect-square w-full ${isPulsing ? 'animate-avatar-pulse' : ''}`}
           >
-            <PeerAvatar pfp={peer.pfp} device={peer.device} name={peer.name} className="h-full w-full" />
+            <TransferRing transfer={transfer}>
+              <PeerAvatar pfp={peer.pfp} device={peer.device} name={peer.name} className="h-full w-full" />
+            </TransferRing>
           </span>
           <div className="flex w-full flex-col items-center">
             <span className="w-full truncate px-1 text-center text-xs font-semibold text-[var(--ink)]">
               {peer.name}
             </span>
-            {req && (
-              <span className={`text-xs leading-tight ${statusColor(req)}`}>
-                {statusText(req)}
+            {(req || transfer) && (
+              <span className={`w-full truncate text-center text-xs leading-tight ${line.color}`}>
+                {line.text}
               </span>
             )}
           </div>

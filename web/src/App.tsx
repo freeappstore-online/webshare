@@ -546,11 +546,25 @@ function Main({
     if (room.incoming) setReceiveOpen(false)
   }, [room.incoming])
 
-  // the transfer window owns the screen once bytes start moving
-  const activeTransfer = room.transfers[room.transfers.length - 1] ?? null
+  // Receiving takes over the screen — there's a decision behind it (where the
+  // files went) worth showing. Sending doesn't: the ring on the recipient's
+  // avatar says everything, AirDrop-style, so the share page stays usable.
+  const sendTransfers = room.transfers.filter((t) => t.dir === 'send')
+  const recvTransfers = room.transfers.filter((t) => t.dir === 'recv')
+  const activeTransfer = recvTransfers[recvTransfers.length - 1] ?? null
   useEffect(() => {
     if (activeTransfer) setReceiveOpen(false)
   }, [activeTransfer?.reqId])
+
+  // a finished send ring reverts to the plain avatar on its own; failures
+  // linger a little longer so they're not missed
+  const { dismissTransfer } = room
+  useEffect(() => {
+    const timers = sendTransfers
+      .filter((t) => t.state === 'done' || t.state === 'error' || t.state === 'cancelled')
+      .map((t) => setTimeout(() => dismissTransfer(t.reqId), t.state === 'done' ? 3000 : 6000))
+    return () => timers.forEach(clearTimeout)
+  }, [sendTransfers.map((t) => `${t.reqId}:${t.state}`).join(), dismissTransfer])
 
   const pickRecipient = (peer: PeerInfo) => {
     room.sendShareRequest(peer, filesToShare)
@@ -592,10 +606,12 @@ function Main({
           codePeers={room.codePeers}
           connection={room.connection}
           outgoing={room.outgoing}
+          transfers={sendTransfers}
           shareCode={room.codeRole === 'send' ? room.roomCode : null}
           onShowCode={() => setShareCodeOpen(true)}
           onPick={pickRecipient}
           onWithdraw={room.withdrawShareRequest}
+          onCancelTransfer={room.cancelTransfer}
           onBack={() => setPage('files')}
         />
       )}

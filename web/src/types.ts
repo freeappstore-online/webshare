@@ -64,6 +64,9 @@ export type TransferState = 'connecting' | 'transferring' | 'done' | 'cancelled'
 export interface TransferProgress {
   reqId: string
   dir: 'send' | 'recv'
+  /** Which peer this is with — matches PeerInfo.id, so the share page can
+   *  draw the ring on the right avatar. */
+  peerId: string
   peerName: string
   peerPfp: string | null
   state: TransferState
