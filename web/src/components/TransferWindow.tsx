@@ -11,26 +11,44 @@ interface TransferWindowProps {
   onDismiss: (reqId: string) => void
 }
 
-/** Throughput over the last few seconds, in bytes/sec. */
-const RATE_WINDOW_MS = 3000
+/** Rate is averaged over this much recent history before estimating. */
+const RATE_WINDOW_MS = 5000
+/** Weight given to a new estimate; the rest carries over, so it doesn't jump. */
+const SMOOTHING = 0.25
+
+/** "about 2 min left" — deliberately vague, because the estimate is. */
+function phrase(secs: number): string {
+  if (secs < 10) return 'a few seconds left'
+  if (secs < 60) return `about ${Math.round(secs / 10) * 10} seconds left`
+  if (secs < 90) return 'about a minute left'
+  if (secs < 60 * 60) return `about ${Math.round(secs / 60)} min left`
+  const hours = secs / 3600
+  return hours < 1.5 ? 'over an hour left' : `about ${Math.round(hours)} hours left`
+}
 
 /**
- * Live transfer speed.
+ * Time remaining, from throughput over a trailing window.
  *
- * Deliberately *not* bytes ÷ time-since-the-transfer-started: that start is
- * stamped before the WebRTC handshake, so connection setup gets averaged into
- * the number and a quick transfer of a small file reads as a few hundred KB/s
- * however fast the link really is. Sampling a short trailing window measures
- * what is actually flowing right now.
+ * Shows time rather than speed: "1.4 MB/s" asks the reader to divide it into
+ * what's left, and the answer is the only part they wanted. The estimate is
+ * smoothed because a raw one swings wildly on a lossy link — a number that
+ * jumps between 20 seconds and 3 minutes is worse than none at all.
  */
-function useTransferRate(bytesDone: number, running: boolean, reqId: string | undefined) {
+function useTimeLeft(
+  bytesDone: number,
+  bytesTotal: number,
+  running: boolean,
+  reqId: string | undefined
+) {
   const samples = useRef<{ t: number; b: number }[]>([])
-  const latest = useRef(bytesDone)
-  latest.current = bytesDone
+  const smoothed = useRef<number | null>(null)
+  const latest = useRef({ done: bytesDone, total: bytesTotal })
+  latest.current = { done: bytesDone, total: bytesTotal }
   const [text, setText] = useState<string | null>(null)
 
   useEffect(() => {
     samples.current = []
+    smoothed.current = null
     setText(null)
   }, [reqId])
 
@@ -38,7 +56,8 @@ function useTransferRate(bytesDone: number, running: boolean, reqId: string | un
     if (!running) return
     const id = setInterval(() => {
       const now = Date.now()
-      samples.current.push({ t: now, b: latest.current })
+      const { done, total } = latest.current
+      samples.current.push({ t: now, b: done })
       const cutoff = now - RATE_WINDOW_MS
       while (samples.current.length > 2 && samples.current[0].t < cutoff) samples.current.shift()
 
@@ -46,9 +65,17 @@ function useTransferRate(bytesDone: number, running: boolean, reqId: string | un
       const last = samples.current[samples.current.length - 1]
       const secs = (last.t - first.t) / 1000
       const moved = last.b - first.b
-      // nothing has moved yet (still connecting) — say nothing rather than "0 B/s"
-      setText(secs >= 0.5 && moved > 0 ? `${formatBytes(moved / secs)}/s` : null)
-    }, 400)
+      // still connecting, or stalled — say nothing rather than guess
+      if (secs < 1 || moved <= 0 || total <= 0) return
+
+      const remaining = Math.max(total - done, 0)
+      const estimate = remaining / (moved / secs)
+      smoothed.current =
+        smoothed.current === null
+          ? estimate
+          : smoothed.current + (estimate - smoothed.current) * SMOOTHING
+      setText(phrase(smoothed.current))
+    }, 500)
     return () => clearInterval(id)
   }, [running, reqId])
 
@@ -57,7 +84,12 @@ function useTransferRate(bytesDone: number, running: boolean, reqId: string | un
 
 export function TransferWindow({ transfer, onCancel, onDismiss }: TransferWindowProps) {
   const running = transfer?.state === 'connecting' || transfer?.state === 'transferring'
-  const speed = useTransferRate(transfer?.bytesDone ?? 0, running, transfer?.reqId)
+  const timeLeft = useTimeLeft(
+    transfer?.bytesDone ?? 0,
+    transfer?.bytesTotal ?? 0,
+    running,
+    transfer?.reqId
+  )
   const [copied, setCopied] = useState(false)
   const [showReport, setShowReport] = useState(false)
   useEffect(() => { setCopied(false); setShowReport(false) }, [transfer?.reqId])
@@ -128,7 +160,8 @@ export function TransferWindow({ transfer, onCancel, onDismiss }: TransferWindow
             </span>
           </div>
 
-          <p className="mt-1 min-h-4 truncate text-xs text-[var(--muted)]">
+          <div className="mt-1 flex min-h-4 items-baseline justify-between gap-3 text-xs text-[var(--muted)]">
+            <span className="min-w-0 flex-1 truncate">
             {failed
               ? transfer.error
               : done
@@ -140,8 +173,9 @@ export function TransferWindow({ transfer, onCancel, onDismiss }: TransferWindow
                   : state === 'connecting'
                     ? 'Connecting directly…'
                     : ''}
-            {speed && ` · ${speed}`}
-          </p>
+            </span>
+            {running && timeLeft && <span className="shrink-0">{timeLeft}</span>}
+          </div>
 
         </div>
 
