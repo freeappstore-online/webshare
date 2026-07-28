@@ -15,6 +15,7 @@ import { useProfile } from './hooks/useProfile'
 import { withThemeFade } from './lib/themeFade'
 import { useShareRoom } from './hooks/useShareRoom'
 import { mergeFiles, readEntry } from './lib/files'
+import { FolderPickError, canPickFolderHandle, pickFolderToSend } from './lib/pickFolder'
 import { generateShareCode, isShareCode } from './lib/shareCode'
 import { FilesPage } from './pages/FilesPage'
 import { SharePage } from './pages/SharePage'
@@ -117,7 +118,31 @@ export default function App() {
   const [dragOver, setDragOver] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const folderInput = useRef<HTMLInputElement>(null)
+  const [folderError, setFolderError] = useState<string | null>(null)
+  const [readingFolder, setReadingFolder] = useState(false)
   useEffect(() => { setAddPickerOpen(false) }, [files.length])
+  useEffect(() => { if (addPickerOpen) setFolderError(null) }, [addPickerOpen])
+
+  /**
+   * Prefer the File System Access picker: it grants a directory handle we walk
+   * ourselves, instead of making the browser slurp the whole tree and ask to
+   * "upload N files". Browsers without it fall back to the hidden
+   * webkitdirectory input.
+   */
+  const addFolder = () => {
+    setFolderError(null)
+    if (!canPickFolderHandle) {
+      folderInput.current?.click()
+      return
+    }
+    setReadingFolder(true)
+    void pickFolderToSend()
+      .then((folder) => addFilesBatched([folder]))
+      .catch((err: unknown) => {
+        if (err instanceof FolderPickError && !err.cancelled) setFolderError(err.message)
+      })
+      .finally(() => setReadingFolder(false))
+  }
   useEffect(() => {
     const onResize = () => setSharePerRowViewport(getDefaultSharePerRow(window.innerWidth))
     window.addEventListener('resize', onResize)
@@ -354,18 +379,28 @@ export default function App() {
               <span className="text-sm font-semibold text-[var(--ink)]">Add files</span>
             </button>
             <button
-              onClick={() => folderInput.current?.click()}
-              className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[1.25rem] border-2 border-dashed py-2.5 px-6 text-[var(--muted)] transition-none"
+              onClick={addFolder}
+              disabled={readingFolder}
+              className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[1.25rem] border-2 border-dashed py-2.5 px-6 text-[var(--muted)] transition-none disabled:opacity-60"
               style={{ borderColor: 'var(--line-strong)', background: 'var(--paper-deep)' }}
             >
               <FolderToFilesIcon size={26} />
-              <span className="text-sm font-semibold text-[var(--ink)]">Add files from a folder</span>
+              <span className="text-sm font-semibold text-[var(--ink)]">
+                {readingFolder ? 'Reading folder…' : 'Add a folder'}
+              </span>
             </button>
           </div>
-          <p className="flex items-center gap-1.5 px-1 text-xs opacity-55 text-[var(--ink)]">
-            <TriangleInfoIcon size={18} className="shrink-0" />
-            Use drag &amp; drop to add folders having more than 1,000 files
-          </p>
+          {folderError ? (
+            <p className="flex items-start gap-1.5 px-1 text-xs text-[var(--error)]">
+              <TriangleInfoIcon size={18} className="shrink-0" />
+              {folderError}
+            </p>
+          ) : (
+            <p className="flex items-center gap-1.5 px-1 text-xs opacity-55 text-[var(--ink)]">
+              <TriangleInfoIcon size={18} className="shrink-0" />
+              Drag &amp; drop works too — and it's the way in if a folder is blocked
+            </p>
+          )}
           <button
             onClick={() => setAddPickerOpen(false)}
             aria-label="Cancel"
