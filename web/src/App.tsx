@@ -10,10 +10,11 @@ import { CloseIcon, FolderToFilesIcon, TriangleInfoIcon, UploadIcon, ViewIconsIc
 import { ProfileForm } from './components/ProfileForm'
 import { ReceiveWindow } from './components/ReceiveWindow'
 import { ShareCodeWindow } from './components/ShareCodeWindow'
+import { TransferWindow } from './components/TransferWindow'
 import { useProfile } from './hooks/useProfile'
 import { withThemeFade } from './lib/themeFade'
 import { useShareRoom } from './hooks/useShareRoom'
-import { mergeFiles, readEntry, toFileMeta } from './lib/files'
+import { mergeFiles, readEntry } from './lib/files'
 import { generateShareCode, isShareCode } from './lib/shareCode'
 import { FilesPage } from './pages/FilesPage'
 import { SharePage } from './pages/SharePage'
@@ -545,8 +546,14 @@ function Main({
     if (room.incoming) setReceiveOpen(false)
   }, [room.incoming])
 
+  // the transfer window owns the screen once bytes start moving
+  const activeTransfer = room.transfers[room.transfers.length - 1] ?? null
+  useEffect(() => {
+    if (activeTransfer) setReceiveOpen(false)
+  }, [activeTransfer?.reqId])
+
   const pickRecipient = (peer: PeerInfo) => {
-    room.sendShareRequest(peer, filesToShare.map(toFileMeta))
+    room.sendShareRequest(peer, filesToShare)
   }
 
   return (
@@ -593,10 +600,11 @@ function Main({
         />
       )}
       <ReceiveWindow
-        open={receiveOpen}
+        open={receiveOpen && !activeTransfer}
         joinedCode={room.codeRole === 'receive' ? room.roomCode : null}
         accepted={room.autoAccepted}
         onJoin={joinAsReceiver}
+        onAccept={(req, target) => room.respondToShare(req, true, target)}
         onLeave={room.leaveRoom}
         onClose={() => setReceiveOpen(false)}
       />
@@ -605,7 +613,16 @@ function Main({
         code={room.codeRole === 'send' ? room.roomCode : null}
         onClose={() => setShareCodeOpen(false)}
       />
-      <IncomingShare request={room.incoming} onRespond={room.respondToShare} onDismiss={room.dismissIncoming} />
+      <IncomingShare
+        request={activeTransfer ? null : room.incoming}
+        onRespond={room.respondToShare}
+        onDismiss={room.dismissIncoming}
+      />
+      <TransferWindow
+        transfer={activeTransfer}
+        onCancel={room.cancelTransfer}
+        onDismiss={room.dismissTransfer}
+      />
     </div>
   )
 }

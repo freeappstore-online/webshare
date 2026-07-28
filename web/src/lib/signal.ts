@@ -117,6 +117,11 @@ export class SignalClient {
     this.socket?.close()
   }
 
+  /** Bytes still queued on the socket — the relay transport's backpressure signal. */
+  get bufferedAmount(): number {
+    return this.socket?.bufferedAmount ?? 0
+  }
+
   /** Relay `data` to peer `to`. Returns false when the socket isn't open (message would be lost). */
   sendTo(to: string, data: unknown): boolean {
     if (this.socket?.readyState !== WebSocket.OPEN) return false

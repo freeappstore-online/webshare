@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { detectDevice } from '../lib/device'
+import { toFileMeta } from '../lib/files'
 import { codeRoom } from '../lib/shareCode'
 import { SignalClient, signalUrl, type SignalState } from '../lib/signal'
+import type { SaveTarget } from '../lib/saveTarget'
+import { Transfer } from '../lib/transfer'
 import type {
   FileMeta,
   IncomingRequest,
@@ -9,6 +12,7 @@ import type {
   PeerInfo,
   PeerMsg,
   Profile,
+  TransferProgress,
 } from '../types'
 
 /** Keep huge batches displayable — the popup shows the first 800 + "N more". */
@@ -52,12 +56,92 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
     return () => clearTimeout(t)
   }, [discoverable])
 
+  // in-flight (and just-finished) transfers, newest last
+  const [transfers, setTransfers] = useState<TransferProgress[]>([])
+
   const clientRef = useRef<SignalClient | null>(null) // default IP room
   const codeClientRef = useRef<SignalClient | null>(null) // extra code room
   const ipPeersRef = useRef<PeerInfo[]>([])
   const codePeersRef = useRef<PeerInfo[]>([])
   // peer ids are per-connection — remember which connection can reach each id
   const peerSourceRef = useRef(new Map<string, SignalClient>())
+
+  // live transfer engines, and the staged Files waiting for an accept
+  const transfersRef = useRef(new Map<string, { transfer: Transfer; peerId: string }>())
+  const pendingSendsRef = useRef(new Map<string, { peer: PeerInfo; files: File[] }>())
+
+  /** The connection that can reach a peer id (falls back to the IP room). */
+  const clientFor = useCallback(
+    (peerId: string): SignalClient | null => peerSourceRef.current.get(peerId) ?? clientRef.current,
+    []
+  )
+
+  const patchTransfer = useCallback((reqId: string, patch: Partial<TransferProgress>) => {
+    setTransfers((prev) => prev.map((t) => (t.reqId === reqId ? { ...t, ...patch } : t)))
+  }, [])
+
+  /**
+   * Build a Transfer plus its progress row. Both sides go through here — the
+   * only difference is who supplies the Files and who supplies the SaveTarget.
+   */
+  const startTransfer = useCallback(
+    (opts: {
+      reqId: string
+      peer: PeerInfo
+      dir: 'send' | 'recv'
+      files?: File[]
+      target?: SaveTarget | null
+    }) => {
+      const { reqId, peer, dir } = opts
+      if (transfersRef.current.has(reqId)) return
+
+      const transfer = new Transfer({
+        reqId,
+        role: dir === 'send' ? 'sender' : 'receiver',
+        files: opts.files,
+        target: opts.target,
+        relaySend: (payload) =>
+          void clientFor(peer.id)?.sendTo(peer.id, { t: 'xfer-data', reqId, ...payload } as PeerMsg),
+        relayBuffered: () => clientFor(peer.id)?.bufferedAmount ?? 0,
+        handlers: {
+          onSignal: (msg) => void clientFor(peer.id)?.sendTo(peer.id, msg),
+          onProgress: (stats) => patchTransfer(reqId, { ...stats, state: 'transferring' }),
+          onRelayed: () => patchTransfer(reqId, { relayed: true }),
+          onDone: () =>
+            patchTransfer(reqId, {
+              state: 'done',
+              currentName: null,
+              savedTo: opts.target?.label ?? null,
+            }),
+          onError: (error) => patchTransfer(reqId, { state: 'error', error }),
+          onRemoteCancel: () =>
+            patchTransfer(reqId, {
+              state: 'cancelled',
+              error: `${peer.name} cancelled the transfer`,
+            }),
+        },
+      })
+
+      transfersRef.current.set(reqId, { transfer, peerId: peer.id })
+      setTransfers((prev) => [
+        ...prev.filter((t) => t.reqId !== reqId),
+        {
+          reqId,
+          dir,
+          peerName: peer.name,
+          peerPfp: peer.pfp,
+          state: 'connecting',
+          relayed: false,
+          savedTo: null,
+          error: null,
+          startedAt: Date.now(),
+          ...transfer.progress,
+        },
+      ])
+      transfer.start()
+    },
+    [patchTransfer, clientFor]
+  )
 
   const mergePeers = useCallback(() => {
     const byName = (a: PeerInfo, b: PeerInfo) => a.name.localeCompare(b.name)
@@ -82,10 +166,10 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
         total: Number.isFinite(m.total) ? Math.max(m.total, files.length) : files.length,
         files,
       }
-      // we typed this sender's code — that already was the consent, so skip
-      // the Accept/Decline prompt and accept on the spot
+      // we typed this sender's code — that already was the consent, so there's
+      // no Accept/Decline prompt; the receive window just asks where to save
+      // (the picker needs a click, so the accept is still sent from there)
       if (client === codeClientRef.current && codeSessionRef.current?.role === 'receive') {
-        client.sendTo(from, { t: 'share-resp', reqId: req.reqId, accept: true })
         setAutoAccepted(req)
         return
       }
@@ -97,6 +181,25 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
       setOutgoing((prev) =>
         prev.map((o) => o.reqId === m.reqId && o.status === 'waiting' ? { ...o, status: m.accept ? 'accepted' : 'declined' } : o)
       )
+      // withdrawing drops the staged files, so a late "accept" finds nothing
+      // here and correctly sends nothing
+      const staged = pendingSendsRef.current.get(m.reqId)
+      pendingSendsRef.current.delete(m.reqId)
+      if (m.accept && staged) {
+        startTransfer({ reqId: m.reqId, peer: staged.peer, dir: 'send', files: staged.files })
+      }
+    } else if (m?.t === 'rtc-offer' && typeof m.sdp === 'string') {
+      void transfersRef.current.get(m.reqId)?.transfer.handleOffer(m.sdp)
+    } else if (m?.t === 'rtc-answer' && typeof m.sdp === 'string') {
+      void transfersRef.current.get(m.reqId)?.transfer.handleAnswer(m.sdp)
+    } else if (m?.t === 'rtc-ice' && m.candidate) {
+      void transfersRef.current.get(m.reqId)?.transfer.handleIce(m.candidate)
+    } else if (m?.t === 'xfer-relay') {
+      transfersRef.current.get(m.reqId)?.transfer.acceptRelay()
+    } else if (m?.t === 'xfer-data') {
+      transfersRef.current.get(m.reqId)?.transfer.handleRelayData(m)
+    } else if (m?.t === 'xfer-abort') {
+      transfersRef.current.get(m.reqId)?.transfer.remoteAbort()
     } else if (m?.t === 'share-cancel') {
       setIncomingQueue((prev) => {
         const idx = prev.findIndex((r) => r.reqId === m.reqId)
@@ -107,7 +210,7 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
         return prev.filter((_, i) => i !== idx)
       })
     }
-  }, [])
+  }, [startTransfer])
 
   // default (IP room) connection — lives as long as the app
   useEffect(() => {
@@ -182,11 +285,9 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
     }
   }, [profile, codeSession])
 
-  /** The connection that can reach a peer id (falls back to the IP room). */
-  const clientFor = (peerId: string) => peerSourceRef.current.get(peerId) ?? clientRef.current
-
-  const sendShareRequest = useCallback((peer: PeerInfo, metas: FileMeta[]) => {
+  const sendShareRequest = useCallback((peer: PeerInfo, toSend: File[]) => {
     const reqId = crypto.randomUUID().slice(0, 8)
+    const metas = toSend.map(toFileMeta)
     const base = {
       t: 'share-req' as const,
       reqId,
@@ -209,20 +310,54 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
     const msg: PeerMsg = { ...base, files }
     // don't show a "Waiting…" that can never resolve if the socket is down
     if (!clientFor(peer.id)?.sendTo(peer.id, msg)) return
+    // hold the actual Files until they accept — that's when bytes start moving
+    pendingSendsRef.current.set(reqId, { peer, files: toSend })
     setOutgoing((prev) => [...prev, { reqId, toId: peer.id, toName: peer.name, status: 'waiting' }])
-  }, [profile])
+  }, [profile, clientFor])
 
-  const respondToShare = useCallback((req: IncomingRequest, accept: boolean) => {
+  /**
+   * Answer a share request. On accept, `target` is where the files will be
+   * written — the receiver side of the transfer is registered *before* the
+   * accept goes out, so the sender's offer can't arrive too early.
+   */
+  const respondToShare = useCallback((req: IncomingRequest, accept: boolean, target?: SaveTarget | null) => {
     if (!req.withdrawn) {
+      if (accept) startTransfer({ reqId: req.reqId, peer: req.from, dir: 'recv', target })
       const msg: PeerMsg = { t: 'share-resp', reqId: req.reqId, accept }
       clientFor(req.from.id)?.sendTo(req.from.id, msg)
     }
     setIncomingQueue((prev) => prev.filter((r) => r.reqId !== req.reqId))
-  }, [])
+    setAutoAccepted((prev) => (prev?.reqId === req.reqId ? null : prev))
+  }, [clientFor, startTransfer])
 
   const withdrawShareRequest = useCallback((reqId: string, toId: string) => {
     clientFor(toId)?.sendTo(toId, { t: 'share-cancel', reqId } as PeerMsg)
+    // drop the staged files so an accept that crosses the withdrawal in flight
+    // doesn't start a transfer the sender already backed out of
+    pendingSendsRef.current.delete(reqId)
     setOutgoing((prev) => prev.map((o) => o.reqId === reqId ? { ...o, status: 'withdrawn' } : o))
+  }, [clientFor])
+
+  /** Stop a running transfer from this side and tell the peer. */
+  const cancelTransfer = useCallback((reqId: string) => {
+    transfersRef.current.get(reqId)?.transfer.cancel()
+    patchTransfer(reqId, { state: 'cancelled', error: null })
+  }, [patchTransfer])
+
+  /** Close a finished/failed transfer's window. */
+  const dismissTransfer = useCallback((reqId: string) => {
+    transfersRef.current.get(reqId)?.transfer.dispose()
+    transfersRef.current.delete(reqId)
+    setTransfers((prev) => prev.filter((t) => t.reqId !== reqId))
+  }, [])
+
+  // never leave a writable file handle dangling when the app goes away
+  useEffect(() => {
+    const engines = transfersRef.current
+    return () => {
+      for (const { transfer } of engines.values()) transfer.dispose()
+      engines.clear()
+    }
   }, [])
 
   const clearOutgoing = useCallback((reqId: string) => {
@@ -245,5 +380,5 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
   const roomCode = codeSession?.code ?? null
   const codeRole = codeSession?.role ?? null
 
-  return { connection, peers, codePeers, incoming, outgoing, roomCode, codeRole, autoAccepted, joinRoom, leaveRoom, sendShareRequest, withdrawShareRequest, respondToShare, clearOutgoing, dismissIncoming }
+  return { connection, peers, codePeers, incoming, outgoing, roomCode, codeRole, autoAccepted, transfers, joinRoom, leaveRoom, sendShareRequest, withdrawShareRequest, respondToShare, cancelTransfer, dismissTransfer, clearOutgoing, dismissIncoming }
 }

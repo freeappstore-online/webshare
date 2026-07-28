@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Spinner } from '@freeappstore/sdk/ui'
 import { parseScannedCode } from '../lib/shareCode'
+import { canPickLocation, pickSaveTarget, type SaveTarget } from '../lib/saveTarget'
 import { CodeInput } from './CodeInput'
-import { CloseIcon, QrCodeIcon } from './icons'
+import { CloseIcon, DownloadIcon, QrCodeIcon } from './icons'
 import { FloatingWindow } from './FloatingWindow'
 import { PeerAvatar } from './PeerAvatar'
 import type { IncomingRequest } from '../types'
@@ -11,19 +12,22 @@ interface ReceiveWindowProps {
   open: boolean
   /** Set while joined to a code room as receiver — shows the waiting view. */
   joinedCode: string | null
-  /** A request already auto-accepted in this room (code = consent). */
+  /** A request from this room — entering the code was already the consent. */
   accepted: IncomingRequest | null
   onJoin: (code: string) => void
+  /** Confirm the incoming files and say where they go. */
+  onAccept: (request: IncomingRequest, target: SaveTarget) => void
   /** Leave the code room (Cancel while waiting, or closing the window). */
   onLeave: () => void
   onClose: () => void
 }
 
 /** Receiver flow: type the sender's 6-digit share code (or scan their QR). */
-export function ReceiveWindow({ open, joinedCode, accepted, onJoin, onLeave, onClose }: ReceiveWindowProps) {
+export function ReceiveWindow({ open, joinedCode, accepted, onJoin, onAccept, onLeave, onClose }: ReceiveWindowProps) {
   const [code, setCode] = useState('')
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState<string | null>(null)
+  const [picking, setPicking] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
 
   // fresh window every time it opens
@@ -32,8 +36,11 @@ export function ReceiveWindow({ open, joinedCode, accepted, onJoin, onLeave, onC
       setCode('')
       setScanning(false)
       setScanError(null)
+      setPicking(false)
     }
   }, [open])
+
+  useEffect(() => { setPicking(false) }, [accepted?.reqId])
 
   // camera + decode loop, only while the scan view is up
   useEffect(() => {
@@ -99,8 +106,21 @@ export function ReceiveWindow({ open, joinedCode, accepted, onJoin, onLeave, onC
     onClose()
   }
 
+  /**
+   * Entering the code was the consent, so there's nothing to decline — but the
+   * browser still needs a click to hand over a save location, so the files
+   * don't start moving until this button is pressed.
+   */
+  const save = (req: IncomingRequest) => {
+    setPicking(true)
+    void pickSaveTarget(req.total, req.files[0]?.n ?? 'file').then((target) => {
+      setPicking(false)
+      if (target) onAccept(req, target)
+    })
+  }
+
   return (
-    <FloatingWindow open={open} closeOnBackdrop onClose={close}>
+    <FloatingWindow open={open} closeOnBackdrop={!picking} onClose={close}>
       {joinedCode && accepted ? (
         <div className="flex flex-col items-center gap-4 py-2 text-center">
           <div className="flex flex-col items-center gap-1.5">
@@ -109,10 +129,24 @@ export function ReceiveWindow({ open, joinedCode, accepted, onJoin, onLeave, onC
               {accepted.from.name}
             </p>
           </div>
-          <p className="flex items-center justify-center gap-2 text-sm text-[var(--muted)]">
-            <Spinner size={14} />
-            is sending {accepted.total} item{accepted.total === 1 ? '' : 's'}…
+          <p className="text-sm text-[var(--muted)]">
+            is sending you {accepted.total} item{accepted.total === 1 ? '' : 's'}
           </p>
+          <div className="flex w-full flex-col gap-2">
+            <button
+              onClick={() => save(accepted)}
+              disabled={picking}
+              className="flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-[var(--accent)] font-bold text-white disabled:opacity-60"
+            >
+              {picking ? <Spinner size={14} /> : <DownloadIcon size={18} />}
+              {picking ? 'Choose a folder…' : 'Save them'}
+            </button>
+            <p className="text-xs text-[var(--muted)]">
+              {canPickLocation
+                ? 'You’ll be asked where to save them'
+                : 'They’ll be saved to your downloads'}
+            </p>
+          </div>
           <button
             onClick={close}
             className="min-h-11 w-full cursor-pointer rounded-full border border-[var(--line-strong)] bg-[var(--panel)] font-bold text-[var(--ink)]"
