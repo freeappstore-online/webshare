@@ -169,15 +169,32 @@ export class TransferDiag {
     // stream goes completely silent rather than merely slowing down.
     let worst = 0
     let stalled = 0
+    // Was the wire busy while the stream was silent? If bytes kept arriving
+    // that we couldn't hand over, an earlier lost packet was holding the
+    // ordered stream up (head-of-line blocking) and splitting the file across
+    // independent streams would keep it moving. If the wire went quiet too,
+    // congestion control had shut the whole association down and extra streams
+    // over the same connection would have stalled with it.
+    let wireBusyDuringStalls = 0
+    let wireQuietDuringStalls = 0
     let runStart: number | null = null
     for (let i = 1; i < this.samples.length; i++) {
       const moved = this.samples[i].bytes - this.samples[i - 1].bytes
       if (moved < 16 * 1024) {
-        if (runStart === null) runStart = this.samples[i - 1].t
+        if (runStart === null) runStart = i - 1
       } else if (runStart !== null) {
-        const len = this.samples[i - 1].t - runStart
-        worst = Math.max(worst, len)
-        stalled += len
+        const from = this.samples[runStart]
+        const to = this.samples[i - 1]
+        const len = to.t - from.t
+        if (len > 0) {
+          worst = Math.max(worst, len)
+          stalled += len
+          if (from.wireBytes !== undefined && to.wireBytes !== undefined) {
+            const onWire = to.wireBytes - from.wireBytes
+            if (onWire > 64 * 1024) wireBusyDuringStalls += len
+            else wireQuietDuringStalls += len
+          }
+        }
         runStart = null
       }
     }
@@ -185,7 +202,17 @@ export class TransferDiag {
       const share = end !== undefined && first !== undefined ? (stalled / (end - first)) * 100 : 0
       out.push(`  - the stream went silent for up to ${(worst / 1000).toFixed(1)}s`)
       out.push(`    (${(stalled / 1000).toFixed(1)}s total, ${share.toFixed(0)}% of the transfer)`)
-      out.push('    that is packet loss stalling an ordered stream, not the app')
+      if (wireBusyDuringStalls > wireQuietDuringStalls) {
+        out.push('    bytes kept arriving through the silence: an earlier lost')
+        out.push('    packet was blocking the ordered stream. splitting the file')
+        out.push('    across independent streams would keep it moving.')
+      } else if (wireQuietDuringStalls > 0) {
+        out.push('    nothing arrived at all through the silence: congestion')
+        out.push('    control shut the connection down, so extra streams over')
+        out.push('    the same connection would stall with it.')
+      } else {
+        out.push('    that is packet loss stalling an ordered stream, not the app')
+      }
     }
 
     if (this.retransmitRatio !== undefined && this.retransmitRatio > 1.08) {
