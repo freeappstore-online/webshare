@@ -3,8 +3,9 @@ import { codeUrl } from '../lib/shareCode'
 
 /**
  * QR for a share code, encoding the app URL with ?code= — scanning it with a
- * native camera app opens webshare and auto-joins. Renders nothing until the
- * lazy-loaded encoder finishes (it's fast).
+ * native camera app opens webshare and auto-joins. While the lazy-loaded
+ * encoder runs, an equally-sized blank square holds the layout so the
+ * surrounding window doesn't jump when the image pops in.
  */
 export function QrImage({ code, className }: { code: string; className?: string }) {
   const [src, setSrc] = useState<string | null>(null)
@@ -21,6 +22,6 @@ export function QrImage({ code, className }: { code: string; className?: string 
     }
   }, [code])
 
-  if (!src) return null
+  if (!src) return <div aria-hidden="true" className={`aspect-square ${className ?? ''}`} />
   return <img src={src} alt={`QR code for share code ${code}`} className={className} />
 }
