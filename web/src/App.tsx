@@ -47,7 +47,6 @@ export default function App() {
   // the welcome window can fade in on a clean page
   const [resetting, setResetting] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
-  const [addPickerOpen, setAddPickerOpen] = useState(false)
   const { setPreference } = useTheme()
 
   const handleReset = () => {
@@ -125,7 +124,6 @@ export default function App() {
     const t = setTimeout(() => setFolderNotice(null), 7000)
     return () => clearTimeout(t)
   }, [folderNotice])
-  useEffect(() => { setAddPickerOpen(false) }, [files.length])
   useEffect(() => {
     const onResize = () => setSharePerRowViewport(getDefaultSharePerRow(window.innerWidth))
     window.addEventListener('resize', onResize)
@@ -337,7 +335,7 @@ export default function App() {
             </div>
           ) : page === 'files' && files.length > 0 ? (
             <button
-              onClick={() => setAddPickerOpen(true)}
+              onClick={() => fileInput.current?.click()}
               className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-[1.25rem] border-2 border-dashed px-4 py-2 text-[var(--muted)] transition-none"
               style={{
                 borderColor: dragOver ? 'var(--accent)' : 'var(--line-strong)',
@@ -359,38 +357,6 @@ export default function App() {
         </header>
       )}
 
-      <FloatingWindow open={addPickerOpen} closeOnBackdrop onClose={() => setAddPickerOpen(false)}>
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-3">
-            <button
-              onClick={() => fileInput.current?.click()}
-              className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[1.25rem] border-2 border-dashed py-2.5 px-6 text-[var(--muted)] transition-none"
-              style={{ borderColor: 'var(--line-strong)', background: 'var(--paper-deep)' }}
-            >
-              <UploadIcon size={26} />
-              <span className="text-sm font-semibold text-[var(--ink)]">Add files</span>
-            </button>
-          </div>
-          {folderNotice ? (
-            <p className="flex items-start gap-1.5 px-1 text-xs text-[var(--warning)]">
-              <TriangleInfoIcon size={18} className="shrink-0" />
-              {folderNotice}
-            </p>
-          ) : (
-            <p className="flex items-start gap-1.5 px-1 text-xs opacity-55 text-[var(--ink)]">
-              <TriangleInfoIcon size={18} className="shrink-0" />
-              Folders can't be sent — zip one first and send the zip
-            </p>
-          )}
-          <button
-            onClick={() => setAddPickerOpen(false)}
-            aria-label="Cancel"
-            className="flex cursor-pointer items-center justify-center self-center rounded-full p-2 text-[var(--muted)] transition-colors hover:bg-[var(--line-strong)] hover:text-[var(--ink)]"
-          >
-            <CloseIcon size={20} />
-          </button>
-        </div>
-      </FloatingWindow>
       <FloatingWindow open={aboutOpen} closeOnBackdrop onClose={() => setAboutOpen(false)}>
         <div className="flex flex-col items-center gap-3 py-2 text-center">
           <WebshareLogo alwaysText />
@@ -419,7 +385,7 @@ export default function App() {
           profile={profile}
           animation={pageAnimation}
           onEditProfile={() => setEditing(true)}
-          onOpenAddPicker={() => setAddPickerOpen(true)}
+          onPickFiles={() => fileInput.current?.click()}
           onAddFiles={addFilesBatched}
           page={page}
           setPage={setPage}
@@ -509,7 +475,7 @@ function Main({
   profile,
   animation,
   onEditProfile,
-  onOpenAddPicker,
+  onPickFiles,
   onAddFiles,
   page,
   setPage,
@@ -533,7 +499,7 @@ function Main({
   profile: Profile
   animation: string
   onEditProfile: () => void
-  onOpenAddPicker: () => void
+  onPickFiles: () => void
   onAddFiles: (files: FileList | File[] | null) => void
   page: 'files' | 'share'
   setPage: (page: 'files' | 'share') => void
@@ -623,7 +589,7 @@ function Main({
           onAddFiles={onAddFiles}
           onShare={(f) => { setFilesToShare(f); setPage('share') }}
           onEditProfile={onEditProfile}
-          onOpenAddPicker={onOpenAddPicker}
+          onPickFiles={onPickFiles}
           onReceive={() => setReceiveOpen(true)}
           inputRef={fileInput}
           dragOver={dragOver}

@@ -24,7 +24,8 @@ interface FilesPageProps {
   onAddFiles: (files: FileList | File[] | null) => void
   onShare: (filesToShare: File[]) => void
   onEditProfile: () => void
-  onOpenAddPicker: () => void
+  /** opens the OS file picker (App owns the input ref) */
+  onPickFiles: () => void
   /** opens the receive-files (share code) window */
   onReceive: () => void
   /** owned by App so the nav bar's add-files button can open the picker */
@@ -50,7 +51,7 @@ const VIEWS: Array<{ key: ViewMode; label: string; Icon: typeof ViewListIcon }> 
 ]
 
 /** Main page: who you are, stage files to share, then pick a recipient. */
-export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, onEditProfile, onOpenAddPicker, onReceive, inputRef: input, dragOver, discoverable, onDiscoverableChange }: FilesPageProps) {
+export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, onEditProfile, onPickFiles, onReceive, inputRef: input, dragOver, discoverable, onDiscoverableChange }: FilesPageProps) {
   const [view, setView] = useState<ViewMode>(() => {
     const stored = localStorage.getItem(VIEW_KEY)
     return stored === 'icons' || stored === 'list' ? stored : 'icons'
@@ -295,7 +296,7 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
       {/* big dropzone only while empty; once files are staged it shrinks into the toolbar */}
       {!hasFiles && (
         <button
-          onClick={onOpenAddPicker}
+          onClick={onPickFiles}
           className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-[1.25rem] border-2 border-dashed p-6 text-[var(--muted)] transition-none"
           style={{
             borderColor: dragOver ? 'var(--accent)' : 'var(--line-strong)',
