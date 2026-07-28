@@ -15,7 +15,7 @@ import { useProfile } from './hooks/useProfile'
 import { withThemeFade } from './lib/themeFade'
 import { useShareRoom } from './hooks/useShareRoom'
 import { mergeFiles, readEntry } from './lib/files'
-import { FolderPickError, canPickFolderHandle, pickFolderToSend } from './lib/pickFolder'
+import { BLOCKED_MESSAGE, FolderPickError, canPickFolderHandle, pickFolderToSend } from './lib/pickFolder'
 import { generateShareCode, isShareCode } from './lib/shareCode'
 import { FilesPage } from './pages/FilesPage'
 import { SharePage } from './pages/SharePage'
@@ -390,7 +390,31 @@ export default function App() {
               </span>
             </button>
           </div>
-          {folderError ? (
+          {folderError === BLOCKED_MESSAGE ? (
+            // The picker is a dead end for this folder, so stop offering it and
+            // show the route that does work — dragging isn't blocklisted.
+            <div className="flex flex-col gap-2">
+              <p className="flex items-start gap-1.5 px-1 text-xs text-[var(--error)]">
+                <TriangleInfoIcon size={18} className="shrink-0" />
+                {folderError}
+              </p>
+              <div
+                className="flex flex-col items-center justify-center gap-1.5 rounded-[1.25rem] border-2 border-dashed py-4 px-4 text-center transition-none"
+                style={{
+                  borderColor: dragOver ? 'var(--accent)' : 'var(--line-strong)',
+                  background: dragOver ? 'var(--accent-gradient)' : 'var(--paper-deep)',
+                }}
+              >
+                <FolderToFilesIcon size={26} />
+                <span className="text-sm font-semibold text-[var(--ink)]">
+                  {dragOver ? 'Drop it to add' : 'Drag the folder here instead'}
+                </span>
+                <span className="text-xs text-[var(--muted)]">
+                  Dragging uses a different permission Chrome doesn't restrict
+                </span>
+              </div>
+            </div>
+          ) : folderError ? (
             <p className="flex items-start gap-1.5 px-1 text-xs text-[var(--error)]">
               <TriangleInfoIcon size={18} className="shrink-0" />
               {folderError}

@@ -64,6 +64,13 @@ async function walk(
   }
 }
 
+/**
+ * Shown when the browser blocklists the chosen folder. Callers can compare
+ * against this to switch the UI over to the drag & drop route.
+ */
+export const BLOCKED_MESSAGE =
+  "Chrome won't open that folder — it blocks a fixed list of locations, which on a Mac includes anything inside Library (where iCloud keeps a synced Desktop and Documents)."
+
 export class FolderPickError extends Error {
   /** true when the user simply closed the picker — not worth reporting */
   readonly cancelled: boolean
@@ -90,12 +97,12 @@ export async function pickFolderToSend(): Promise<File> {
   } catch (err) {
     const name = (err as DOMException)?.name
     if (name === 'AbortError') throw new FolderPickError('Cancelled.', true)
-    // Chrome blocks sensitive locations outright; say so plainly rather than
-    // leaving the user staring at a button that did nothing
-    throw new FolderPickError(
-      "Chrome won't share that folder — it protects system and home folders. Pick a subfolder, or drag the folder onto the page instead.",
-      false
-    )
+    // Chrome refuses a fixed list of locations ("contains system files") rather
+    // than actually inspecting the folder. Notably that list includes
+    // ~/Library, which is where macOS puts Desktop and Documents once iCloud
+    // Drive syncs them — so ordinary folders get caught by it. Drag & drop uses
+    // a different API that isn't blocklisted, so send people there.
+    throw new FolderPickError(BLOCKED_MESSAGE, false)
   }
 
   const entries: FolderEntry[] = []
