@@ -37,7 +37,7 @@ export interface PathInfo {
   networkType?: string
 }
 
-const SAMPLE_MS = 500
+const SAMPLE_MS = 250
 const LAST_REPORT_KEY = 'webshare:lastReport'
 
 /** Keep the most recent report so it can be read after the window is gone. */
@@ -65,6 +65,8 @@ export class TransferDiag {
   private path: PathInfo = {}
   private chunk = 0
   private maxMessage = 0
+  /** cumulative ms the sender spent waiting on disk reads */
+  private readMs = 0
 
   private readonly role: 'sender' | 'receiver'
 
@@ -75,6 +77,10 @@ export class TransferDiag {
 
   mark(label: string): void {
     this.marks.push({ label, at: performance.now() - this.t0 })
+  }
+
+  addReadTime(ms: number): void {
+    this.readMs += ms
   }
 
   noteChunk(chunk: number, maxMessage: number): void {
@@ -89,7 +95,7 @@ export class TransferDiag {
     backlog: () => number
   ): void {
     if (this.timer) return
-    this.timer = setInterval(() => {
+    const take = () => {
       const sample: Sample = {
         t: performance.now() - this.t0,
         bytes: bytesSoFar(),
@@ -122,7 +128,10 @@ export class TransferDiag {
           }
         })
       }).catch(() => {})
-    }, SAMPLE_MS)
+    }
+    // take one immediately, so the wire-vs-payload baseline spans the whole run
+    take()
+    this.timer = setInterval(take, SAMPLE_MS)
   }
 
   stop(): void {
@@ -227,6 +236,10 @@ export class TransferDiag {
         'rtt p90/max',
         `${sorted[Math.floor(sorted.length * 0.9)].toFixed(0)} / ${sorted[sorted.length - 1].toFixed(0)} ms`
       )
+    }
+    if (this.role === 'sender' && first !== undefined && end > first && this.readMs > 0) {
+      const share = (this.readMs / (end - first)) * 100
+      push('disk read time', `${this.readMs.toFixed(0)} ms (${share.toFixed(0)}% of transfer)`)
     }
     // heavy retransmission shows up as far more on the wire than in the file
     const wire = this.samples.filter((x) => x.wireBytes !== undefined)

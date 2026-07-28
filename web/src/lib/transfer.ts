@@ -318,11 +318,25 @@ export class Transfer {
         channel.send(JSON.stringify({ t: 'file', i, n: file.name }))
 
         const chunk = this.chunkSize()
-        // read in big blocks, send in wire-sized pieces — a disk round trip per
-        // 16 KB costs far more than the copy out of an already-loaded block
+        // Read in big blocks (a disk round trip per 16 KB would cost far more
+        // than copying out of a loaded block) — but start the *next* read
+        // before sending the current block, so the disk and the network work
+        // at the same time. Reading and sending strictly in turn left the wire
+        // idle for the whole of every read.
+        const readAt = async (off: number) => {
+          const t = performance.now()
+          const buf = await file.slice(off, off + READ_BLOCK).arrayBuffer()
+          this.diag.addReadTime(performance.now() - t)
+          return buf
+        }
+
+        let inFlight: Promise<ArrayBuffer> | null = readAt(0)
         for (let off = 0; off < file.size; off += READ_BLOCK) {
           if (stale()) return
-          const block = await file.slice(off, off + READ_BLOCK).arrayBuffer()
+          const block = await inFlight!
+          const next = off + READ_BLOCK
+          inFlight = next < file.size ? readAt(next) : null
+
           for (let p = 0; p < block.byteLength; p += chunk) {
             if (stale()) return
             if (channel.bufferedAmount > HIGH_WATER) await this.drain(channel)
