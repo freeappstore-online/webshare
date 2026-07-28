@@ -73,7 +73,9 @@ export function TransferWindow({ transfer, onCancel, onDismiss }: TransferWindow
               className="h-full rounded-full"
               style={{
                 width: `${failed ? 100 : pct}%`,
-                background: failed ? 'var(--error)' : done ? 'var(--success)' : 'var(--accent-gradient)',
+                // --accent, not --accent-gradient: the latter is a faint tint
+                // for drop-zone backgrounds and reads as almost empty here
+                background: failed ? 'var(--error)' : done ? 'var(--success)' : 'var(--accent)',
                 // no easing on the first paint, then smooth out the jumps
                 transition: 'width 200ms linear',
               }}

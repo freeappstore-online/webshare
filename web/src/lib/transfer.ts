@@ -586,9 +586,19 @@ export class Transfer {
     this.teardown()
   }
 
-  /** Peer cancelled. */
+  /**
+   * Peer cancelled.
+   *
+   * This can land *after* we've marked ourselves done: on a fast link the
+   * sender pushes its last byte long before the receiver has finished writing,
+   * so "done" on this side only ever meant "sent", not "received". A receiver
+   * only sends abort when it did not complete, so their cancel is the true
+   * outcome and has to override our optimistic finish — otherwise the sender
+   * cheerfully reports "Sent" for files that were thrown away.
+   */
   remoteAbort(): void {
-    if (this.finished || this.aborted) return
+    if (this.aborted) return
+    this.finished = false
     this.aborted = true
     this.cleanupPartial()
     this.teardown()
