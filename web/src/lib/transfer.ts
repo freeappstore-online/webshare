@@ -41,6 +41,12 @@ const HIGH_WATER = 4 * 1024 * 1024
 const LOW_WATER = 512 * 1024
 /** How long to wait for the direct channel before calling it unreachable. */
 const CONNECT_TIMEOUT_MS = 15_000
+/**
+ * How long the sender waits for the receiver to confirm it saved everything.
+ * Generous: the receiver may still be flushing gigabytes to disk, or zipping,
+ * long after the last byte arrived.
+ */
+const ACK_TIMEOUT_MS = 120_000
 
 /**
  * Empty on purpose. A STUN server's job is to discover your *public* address
@@ -89,6 +95,7 @@ export class Transfer {
   private pc: RTCPeerConnection | null = null
   private channel: RTCDataChannel | null = null
   private connectTimer: ReturnType<typeof setTimeout> | undefined
+  private ackTimer: ReturnType<typeof setTimeout> | undefined
   /** ICE candidates that arrived before the remote description was applied. */
   private pendingIce: RTCIceCandidateInit[] = []
   private finished = false
@@ -330,7 +337,11 @@ export class Transfer {
 
       if (stale()) return
       channel.send(JSON.stringify({ t: 'done' }))
-      this.complete()
+      // not finished yet — only the receiver can say the files actually landed
+      this.diag.mark('done-sent')
+      this.ackTimer = setTimeout(() => {
+        this.fail("The other device never confirmed it saved the files.")
+      }, ACK_TIMEOUT_MS)
     } catch (err) {
       if (!stale()) this.fail(err instanceof Error ? err.message : 'Transfer failed')
     }
@@ -369,8 +380,18 @@ export class Transfer {
       this.flushPending()
       this.enqueue(async () => {
         await this.target?.finish()
+        // tell the sender before we settle: this is what lets it report "Sent"
+        // truthfully, and it must go out while the channel is still open
+        try {
+          this.channel?.send(JSON.stringify({ t: 'ack' }))
+        } catch {
+          /* channel already gone; the sender will time out and say so */
+        }
         this.complete()
       })
+    } else if (msg?.t === 'ack') {
+      clearTimeout(this.ackTimer)
+      this.complete()
     } else if (msg?.t === 'abort') {
       this.remoteAbort()
     }
@@ -426,26 +447,15 @@ export class Transfer {
     if (this.finished || this.aborted) return
     this.finished = true
     clearTimeout(this.connectTimer)
+    clearTimeout(this.ackTimer)
     this.publishReport('completed')
     this.stats.currentName = null
     this.emit(true)
     this.handlers.onDone()
-
-    if (this.role !== 'sender') {
-      this.teardown()
-      return
-    }
-    // Closing the channel with bytes still queued would strand the receiver's
-    // final chunks, so hold it open until the wire drains (or we give up).
-    const deadline = Date.now() + 15_000
-    const waitDrain = () => {
-      if ((this.channel?.bufferedAmount ?? 0) > 0 && Date.now() < deadline) {
-        setTimeout(waitDrain, 100)
-        return
-      }
-      this.teardown()
-    }
-    setTimeout(waitDrain, 100)
+    // Give the last control message (the receiver's ack) time to leave before
+    // the channel goes away. By this point all payload is accounted for, so
+    // this is only about the handshake tail, not data.
+    setTimeout(() => this.teardown(), 500)
   }
 
   private fail(message: string): void {
@@ -512,6 +522,7 @@ export class Transfer {
 
   private teardown(): void {
     clearTimeout(this.connectTimer)
+    clearTimeout(this.ackTimer)
     this.channel?.close()
     this.channel = null
     this.pc?.close()
