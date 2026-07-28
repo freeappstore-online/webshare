@@ -113,7 +113,8 @@ export function ReceiveWindow({ open, joinedCode, accepted, onJoin, onAccept, on
    */
   const save = (req: IncomingRequest) => {
     setPicking(true)
-    void pickSaveTarget(req.total, req.files[0]?.n ?? 'file').then((target) => {
+    const hasFolder = req.files.some((f) => f.k === 'folder')
+    void pickSaveTarget(req.total, req.files[0]?.n ?? 'file', hasFolder).then((target) => {
       setPicking(false)
       if (target) onAccept(req, target)
     })

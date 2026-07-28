@@ -301,10 +301,17 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
         className="hidden"
         {...{ webkitdirectory: '' }}
         onChange={(e) => {
-          const first = e.target.files?.[0]
-          if (first) {
-            const folderName = first.webkitRelativePath?.split('/')[0] || first.name
-            onAddFiles([makeFolderItem(folderName)])
+          const picked = e.target.files
+          if (picked?.length) {
+            const all = Array.from(picked)
+            // webkitRelativePath is "<folder>/sub/file.ext" — the first segment
+            // is the folder itself, which the placeholder already carries
+            const root = all[0].webkitRelativePath?.split('/')[0] || all[0].name
+            const entries = all.map((file) => ({
+              file,
+              path: file.webkitRelativePath?.split('/').slice(1).join('/') || file.name,
+            }))
+            onAddFiles([makeFolderItem(root, entries)])
           }
           e.target.value = ''
         }}

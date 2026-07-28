@@ -24,7 +24,9 @@ export function IncomingShare({ request, onRespond, onDismiss }: IncomingSharePr
   const accept = (req: IncomingRequest) => {
     setPicking(true)
     const first = req.files[0]?.n ?? 'file'
-    void pickSaveTarget(req.total, first).then((target) => {
+    // a folder needs a directory to rebuild itself into, whatever the item count
+    const hasFolder = req.files.some((f) => f.k === 'folder')
+    void pickSaveTarget(req.total, first, hasFolder).then((target) => {
       setPicking(false)
       // picker dismissed — they changed their mind, leave the prompt up
       if (!target) return

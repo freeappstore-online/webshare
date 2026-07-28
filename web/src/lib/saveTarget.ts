@@ -25,6 +25,7 @@ interface FsFileHandle {
 interface FsDirHandle {
   name: string
   getFileHandle(name: string, opts?: { create?: boolean }): Promise<FsFileHandle>
+  getDirectoryHandle(name: string, opts?: { create?: boolean }): Promise<FsDirHandle>
   removeEntry(name: string, opts?: { recursive?: boolean }): Promise<void>
 }
 
@@ -65,36 +66,60 @@ function safeName(name: string, fallback: string): string {
   return cleaned || fallback
 }
 
-/** Streams directly into a user-granted folder. */
+/**
+ * Split an incoming "folder/sub/file.ext" into sanitised segments.
+ *
+ * The path comes from the peer, so it's untrusted: `..` and absolute paths
+ * have to be neutralised or a sender could write outside the folder the user
+ * picked. Sanitising each segment separately (rather than the whole string)
+ * keeps the directory structure while making traversal impossible.
+ */
+function safeSegments(path: string): { dirs: string[]; name: string } {
+  const parts = path
+    .split('/')
+    .filter((p) => p !== '' && p !== '.' && p !== '..')
+    .map((p) => safeName(p, 'item'))
+  const name = parts.pop() ?? 'file'
+  // don't let a pathological path nest forever
+  return { dirs: parts.slice(0, 32), name }
+}
+
+/** Streams directly into a user-granted folder, recreating any subfolders. */
 function directoryTarget(dir: FsDirHandle): SaveTarget {
   const used = new Set<string>()
-  const written: string[] = []
   return {
     label: dir.name,
-    async create(name) {
-      // "photo.jpg" twice in one batch would clobber itself — suffix duplicates
-      let final = safeName(name, 'file')
-      if (used.has(final)) {
-        const dot = final.lastIndexOf('.')
-        const stem = dot > 0 ? final.slice(0, dot) : final
-        const ext = dot > 0 ? final.slice(dot) : ''
+    async create(path) {
+      const { dirs, name } = safeSegments(path)
+      // walk (creating as needed) down to the file's own directory
+      let parent = dir
+      for (const segment of dirs) {
+        parent = await parent.getDirectoryHandle(segment, { create: true })
+      }
+
+      // "photo.jpg" twice in the same directory would clobber itself
+      const key = [...dirs, name].join('/')
+      let final = name
+      if (used.has(key)) {
+        const dot = name.lastIndexOf('.')
+        const stem = dot > 0 ? name.slice(0, dot) : name
+        const ext = dot > 0 ? name.slice(dot) : ''
         let n = 2
-        while (used.has(`${stem} (${n})${ext}`)) n++
+        while (used.has([...dirs, `${stem} (${n})${ext}`].join('/'))) n++
         final = `${stem} (${n})${ext}`
       }
-      used.add(final)
-      const handle = await dir.getFileHandle(final, { create: true })
+      used.add([...dirs, final].join('/'))
+
+      const handle = await parent.getFileHandle(final, { create: true })
       const writable = await handle.createWritable()
+      const owner = parent
       return {
         write: (chunk) => writable.write(chunk),
-        async close() {
-          await writable.close()
-          written.push(final)
-        },
+        close: () => writable.close(),
         async abort() {
           // leave no half-written file behind
           await writable.abort?.().catch(() => {})
-          await dir.removeEntry(final).catch(() => {})
+          await owner.removeEntry(final).catch(() => {})
         },
       }
     },
@@ -130,9 +155,11 @@ function memoryTarget(): SaveTarget {
   let files: { name: string; blob: Blob }[] = []
   return {
     label: 'your downloads',
-    async create(name) {
+    async create(path) {
       const parts: ArrayBuffer[] = []
-      const final = safeName(name, 'file')
+      const { dirs, name } = safeSegments(path)
+      // JSZip builds the directories from the entry name
+      const final = [...dirs, name].join('/')
       return {
         async write(chunk) {
           parts.push(chunk)
@@ -150,7 +177,9 @@ function memoryTarget(): SaveTarget {
       if (files.length === 0) return
       let blob: Blob
       let name: string
-      if (files.length === 1) {
+      // a lone file goes down as itself — but anything with structure has to
+      // be zipped, or the folder layout is lost
+      if (files.length === 1 && !files[0].name.includes('/')) {
         blob = files[0].blob
         name = files[0].name
       } else {
@@ -183,15 +212,22 @@ export const canPickLocation =
   typeof picker.showDirectoryPicker === 'function' || typeof picker.showSaveFilePicker === 'function'
 
 /**
- * Ask the user where to put `count` incoming files. Must be called synchronously
- * from a click handler.
+ * Ask the user where to put `count` incoming items. Must be called
+ * synchronously from a click handler.
+ *
+ * `hasFolder` forces the directory picker: a folder is one item but many files
+ * with a structure to rebuild, which a single save-file handle can't express.
  *
  * Returns `null` when the user dismissed the picker (they changed their mind —
  * the caller should stay on the accept prompt rather than start a transfer).
  */
-export async function pickSaveTarget(count: number, firstName: string): Promise<SaveTarget | null> {
+export async function pickSaveTarget(
+  count: number,
+  firstName: string,
+  hasFolder = false
+): Promise<SaveTarget | null> {
   try {
-    if (count === 1 && picker.showSaveFilePicker) {
+    if (count === 1 && !hasFolder && picker.showSaveFilePicker) {
       return singleFileTarget(
         await picker.showSaveFilePicker({ suggestedName: safeName(firstName, 'file'), id: 'webshare' })
       )

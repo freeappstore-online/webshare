@@ -17,8 +17,51 @@ const VIDEO_EXTS = new Set([
   'rmvb', 'roq', 'svi', 'ts', 'vob', 'webm', 'wmv', 'yuv',
 ])
 
-export function makeFolderItem(name: string): File {
-  return new File([], name, { type: 'application/x-directory' })
+/** A file inside a staged folder, with its path relative to that folder's root. */
+export interface FolderEntry {
+  file: File
+  /** e.g. "photos/trip/a.jpg" — no leading slash, never empty */
+  path: string
+}
+
+/**
+ * A staged folder shows as a single icon, but it has to carry its contents so
+ * it can actually be sent. Keeping them beside the placeholder (rather than
+ * flattening thousands of files into the staging list) is what lets the files
+ * page stay one-icon-per-folder while the transfer still gets everything.
+ */
+const folderContents = new WeakMap<File, { entries: FolderEntry[]; bytes: number }>()
+
+export function makeFolderItem(name: string, entries: FolderEntry[] = []): File {
+  const item = new File([], name, { type: 'application/x-directory' })
+  folderContents.set(item, {
+    entries,
+    bytes: entries.reduce((n, e) => n + e.file.size, 0),
+  })
+  return item
+}
+
+/** Contents of a staged folder, or null if this isn't one. */
+export function folderInfo(file: File): { entries: FolderEntry[]; bytes: number } | null {
+  return folderContents.get(file) ?? null
+}
+
+/**
+ * Flatten what's staged into the files that actually go over the wire, each
+ * with the path it should be written to on the other side. Folders contribute
+ * their whole subtree; everything else keeps its bare name.
+ */
+export function expandForTransfer(items: File[]): FolderEntry[] {
+  const out: FolderEntry[] = []
+  for (const item of items) {
+    const info = folderContents.get(item)
+    if (info) {
+      for (const e of info.entries) out.push({ file: e.file, path: `${item.name}/${e.path}` })
+    } else if (item.type !== 'application/x-directory') {
+      out.push({ file: item, path: item.name })
+    }
+  }
+  return out
 }
 
 
@@ -66,7 +109,40 @@ export function toFileMeta(file: File): FileMeta {
     const ext = dot > 0 && n.length - dot <= 8 ? n.slice(dot) : ''
     n = n.slice(0, 40 - ext.length - 1) + '…' + ext
   }
-  return { n, s: file.size, k: fileKind(file) }
+  // a folder's placeholder is 0 bytes; report what it actually contains
+  const info = folderInfo(file)
+  return { n, s: info ? info.bytes : file.size, k: fileKind(file) }
+}
+
+const entryFile = (entry: FileSystemFileEntry) =>
+  new Promise<File>((res, rej) => entry.file(res, rej))
+
+/**
+ * Walk a dropped directory. `readEntries` only hands back a batch at a time
+ * (Chrome caps it at 100) and returns empty when exhausted, so it has to be
+ * called in a loop — and we yield between batches so a deep tree doesn't lock
+ * up the page while it's being read.
+ */
+async function readDirectory(
+  dir: FileSystemDirectoryEntry,
+  prefix: string,
+  out: FolderEntry[]
+): Promise<void> {
+  const reader = dir.createReader()
+  for (;;) {
+    const batch = await new Promise<FileSystemEntry[]>((res, rej) =>
+      reader.readEntries(res, rej)
+    )
+    if (batch.length === 0) break
+    for (const child of batch) {
+      if (child.isFile) {
+        out.push({ file: await entryFile(child as FileSystemFileEntry), path: prefix + child.name })
+      } else if (child.isDirectory) {
+        await readDirectory(child as FileSystemDirectoryEntry, `${prefix}${child.name}/`, out)
+      }
+    }
+    await new Promise((r) => setTimeout(r, 0))
+  }
 }
 
 export async function readEntry(
@@ -74,16 +150,15 @@ export async function readEntry(
   onFile: (file: File) => void
 ): Promise<void> {
   if (entry.isFile) {
-    const file = await new Promise<File>((res, rej) =>
-      (entry as FileSystemFileEntry).file(res, rej),
-    )
-    onFile(file)
+    onFile(await entryFile(entry as FileSystemFileEntry))
     return
   }
   if (entry.isDirectory) {
-    // Represent the whole directory as a single folder icon — no recursion,
-    // no filesystem reads, no freezing.
-    onFile(makeFolderItem(entry.name))
+    // One icon for the whole directory, but its contents ride along so the
+    // folder can actually be transferred.
+    const entries: FolderEntry[] = []
+    await readDirectory(entry as FileSystemDirectoryEntry, '', entries)
+    onFile(makeFolderItem(entry.name, entries))
   }
 }
 
