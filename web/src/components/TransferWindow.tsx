@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FloatingWindow } from './FloatingWindow'
 import { PeerAvatar } from './PeerAvatar'
 import { CheckIcon, TriangleInfoIcon } from './icons'
@@ -11,22 +11,53 @@ interface TransferWindowProps {
   onDismiss: (reqId: string) => void
 }
 
-/** "1.2 MB/s" from bytes moved since the transfer started. */
-function rate(bytes: number, since: number): string | null {
-  const secs = (Date.now() - since) / 1000
-  if (secs < 1 || bytes <= 0) return null
-  return `${formatBytes(bytes / secs)}/s`
+/** Throughput over the last few seconds, in bytes/sec. */
+const RATE_WINDOW_MS = 3000
+
+/**
+ * Live transfer speed.
+ *
+ * Deliberately *not* bytes ÷ time-since-the-transfer-started: that start is
+ * stamped before the WebRTC handshake, so connection setup gets averaged into
+ * the number and a quick transfer of a small file reads as a few hundred KB/s
+ * however fast the link really is. Sampling a short trailing window measures
+ * what is actually flowing right now.
+ */
+function useTransferRate(bytesDone: number, running: boolean, reqId: string | undefined) {
+  const samples = useRef<{ t: number; b: number }[]>([])
+  const latest = useRef(bytesDone)
+  latest.current = bytesDone
+  const [text, setText] = useState<string | null>(null)
+
+  useEffect(() => {
+    samples.current = []
+    setText(null)
+  }, [reqId])
+
+  useEffect(() => {
+    if (!running) return
+    const id = setInterval(() => {
+      const now = Date.now()
+      samples.current.push({ t: now, b: latest.current })
+      const cutoff = now - RATE_WINDOW_MS
+      while (samples.current.length > 2 && samples.current[0].t < cutoff) samples.current.shift()
+
+      const first = samples.current[0]
+      const last = samples.current[samples.current.length - 1]
+      const secs = (last.t - first.t) / 1000
+      const moved = last.b - first.b
+      // nothing has moved yet (still connecting) — say nothing rather than "0 B/s"
+      setText(secs >= 0.5 && moved > 0 ? `${formatBytes(moved / secs)}/s` : null)
+    }, 400)
+    return () => clearInterval(id)
+  }, [running, reqId])
+
+  return text
 }
 
 export function TransferWindow({ transfer, onCancel, onDismiss }: TransferWindowProps) {
-  // repaint the speed/ETA line even between progress events
-  const [, tick] = useState(0)
   const running = transfer?.state === 'connecting' || transfer?.state === 'transferring'
-  useEffect(() => {
-    if (!running) return
-    const id = setInterval(() => tick((n) => n + 1), 500)
-    return () => clearInterval(id)
-  }, [running])
+  const speed = useTransferRate(transfer?.bytesDone ?? 0, running, transfer?.reqId)
 
   // FloatingWindow keeps the last children on screen for the exit animation,
   // so the null case still has to render the window itself
@@ -36,7 +67,6 @@ export function TransferWindow({ transfer, onCancel, onDismiss }: TransferWindow
   const pct = bytesTotal > 0 ? Math.min(100, (bytesDone / bytesTotal) * 100) : state === 'done' ? 100 : 0
   const done = state === 'done'
   const failed = state === 'error' || state === 'cancelled'
-  const speed = running ? rate(bytesDone, transfer.startedAt) : null
   const verb = dir === 'send' ? 'Sending' : 'Receiving'
 
   const heading = done
