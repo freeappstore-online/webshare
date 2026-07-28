@@ -211,7 +211,12 @@ export class Transfer {
       clearTimeout(this.connectTimer)
       this.diag.mark('channel-open')
       this.diag.noteChunk(this.chunkSize(), this.pc?.sctp?.maxMessageSize ?? 0)
-      this.diag.startSampling(this.pc, channel, () => this.stats.bytesDone)
+      this.diag.startSampling(
+        this.pc,
+        () => this.stats.bytesDone,
+        // sender: what's queued on the wire; receiver: what's not yet on disk
+        () => (this.role === 'sender' ? (this.channel?.bufferedAmount ?? 0) : this.pendingBytes)
+      )
       if (this.role === 'sender') void this.pump()
     }
     // Chrome hands the receiver a channel that is *already* open, so a plain
