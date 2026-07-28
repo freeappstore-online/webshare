@@ -67,6 +67,8 @@ export class TransferDiag {
   private maxMessage = 0
   /** cumulative ms the sender spent waiting on disk reads */
   private readMs = 0
+  /** wire bytes ÷ payload bytes; above 1 means the link made us re-send */
+  private retransmitRatio: number | undefined
 
   private readonly role: 'sender' | 'receiver'
 
@@ -153,8 +155,6 @@ export class TransferDiag {
     const out: string[] = ['verdict:']
     const rtts = this.samples.map((x) => x.rttMs).filter((n): n is number => n !== undefined)
     const median = rtts.length ? [...rtts].sort((a, b) => a - b)[Math.floor(rtts.length / 2)] : undefined
-    const backlogs = this.samples.map((x) => x.backlog)
-    const busy = backlogs.filter((b) => b > 256 * 1024).length / (backlogs.length || 1)
     const mbps =
       first !== undefined && end !== undefined && end > first
         ? totalBytes / 1048576 / ((end - first) / 1000)
@@ -163,26 +163,64 @@ export class TransferDiag {
     if (this.path.localType && this.path.localType !== 'host') {
       out.push(`  - path is '${this.path.localType}', not a direct LAN hop`)
     }
+
+    // Stalls are the clearest symptom of a lossy link: with ordered delivery a
+    // dropped packet holds up everything behind it while SCTP backs off, so the
+    // stream goes completely silent rather than merely slowing down.
+    let worst = 0
+    let stalled = 0
+    let runStart: number | null = null
+    for (let i = 1; i < this.samples.length; i++) {
+      const moved = this.samples[i].bytes - this.samples[i - 1].bytes
+      if (moved < 16 * 1024) {
+        if (runStart === null) runStart = this.samples[i - 1].t
+      } else if (runStart !== null) {
+        const len = this.samples[i - 1].t - runStart
+        worst = Math.max(worst, len)
+        stalled += len
+        runStart = null
+      }
+    }
+    if (worst > 500) {
+      const share = end !== undefined && first !== undefined ? (stalled / (end - first)) * 100 : 0
+      out.push(`  - the stream went silent for up to ${(worst / 1000).toFixed(1)}s`)
+      out.push(`    (${(stalled / 1000).toFixed(1)}s total, ${share.toFixed(0)}% of the transfer)`)
+      out.push('    that is packet loss stalling an ordered stream, not the app')
+    }
+
+    if (this.retransmitRatio !== undefined && this.retransmitRatio > 1.08) {
+      out.push(
+        `  - ${((this.retransmitRatio - 1) * 100).toFixed(0)}% of what went on the wire was re-sent: the link is dropping packets`
+      )
+    }
+
     if (median !== undefined) {
       if (median > 40) {
         out.push(`  - round-trip ${median.toFixed(0)} ms is far above a healthy LAN (2-10 ms):`)
         out.push('    the wireless link is congested, weak, or power-saving.')
-        out.push('    this caps throughput no matter what the app does.')
       } else {
         out.push(`  - link latency is healthy (${median.toFixed(0)} ms)`)
       }
     }
+
+    const backlogs = this.samples.map((x) => x.backlog)
     if (this.role === 'sender') {
-      if (busy > 0.3) {
+      const full = backlogs.filter((b) => b > 1024 * 1024).length / (backlogs.length || 1)
+      if (full > 0.3) {
         out.push('  - the send buffer stays full: the network is the limit, not us')
       } else if (mbps !== undefined && mbps < 2) {
         out.push('  - the send buffer stays near empty while throughput is low:')
-        out.push('    the sender is being starved (disk, CPU, or backgrounding),')
-        out.push('    or the link is refusing to take data faster.')
+        out.push('    the sender is being starved (disk, CPU, or backgrounding).')
       }
-    } else if (busy > 0.3) {
-      out.push('  - unwritten data is piling up: the disk is the limit on this side')
+    } else {
+      // the receiver buffers up to WRITE_BLOCK on purpose, so only a backlog
+      // well past that means the disk is genuinely falling behind
+      const drowning = backlogs.filter((b) => b > 2 * 1024 * 1024).length / (backlogs.length || 1)
+      if (drowning > 0.3) {
+        out.push('  - unwritten data keeps growing: the disk is the limit on this side')
+      }
     }
+
     if (out.length === 1) out.push('  - nothing anomalous')
     return out
   }
@@ -245,7 +283,10 @@ export class TransferDiag {
     const wire = this.samples.filter((x) => x.wireBytes !== undefined)
     if (wire.length > 1 && totalBytes > 0) {
       const moved = wire[wire.length - 1].wireBytes! - wire[0].wireBytes!
-      if (moved > 0) push('wire vs payload', `${(moved / totalBytes).toFixed(2)}x (1.0 = no retransmits)`)
+      if (moved > 0) {
+        this.retransmitRatio = moved / totalBytes
+        push('wire vs payload', `${this.retransmitRatio.toFixed(2)}x (1.0 = no retransmits)`)
+      }
     }
     lines.push('')
 
