@@ -38,6 +38,24 @@ export interface PathInfo {
 }
 
 const SAMPLE_MS = 250
+
+/**
+ * Diagnostics are off for ordinary users: the per-sample getStats() polling
+ * across every link costs real work during a transfer, and the report is
+ * meaningless to anyone not debugging one. On in development, and switchable on
+ * in production with `localStorage['webshare:debug'] = '1'` so a real device on
+ * a real network can still be measured.
+ */
+export const DIAGNOSTICS: boolean = (() => {
+  // import.meta.env only exists under Vite; guard it so this module can also be
+  // loaded outside the bundler (tests, tooling) without exploding
+  if (import.meta.env?.DEV) return true
+  try {
+    return localStorage.getItem('webshare:debug') === '1'
+  } catch {
+    return false // storage blocked (private mode) — treat as off
+  }
+})()
 const LAST_REPORT_KEY = 'webshare:lastReport'
 
 /** Keep the most recent report so it can be read after the window is gone. */
@@ -50,6 +68,9 @@ export function storeReport(text: string): void {
 }
 
 export function loadReport(): string | null {
+  // a report left over from a debugging session must not resurface for a
+  // normal user after the flag is switched back off
+  if (!DIAGNOSTICS) return null
   try {
     return localStorage.getItem(LAST_REPORT_KEY)
   } catch {
@@ -98,7 +119,7 @@ export class TransferDiag {
     bytesSoFar: () => number,
     backlog: () => number
   ): void {
-    if (this.timer) return
+    if (this.timer || !DIAGNOSTICS) return
     const take = () => {
       const sample: Sample = {
         t: performance.now() - this.t0,

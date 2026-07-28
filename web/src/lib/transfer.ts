@@ -19,7 +19,7 @@
  *   either → { t:'abort' }
  */
 
-import { TransferDiag, storeReport } from './diagnostics'
+import { DIAGNOSTICS, TransferDiag, storeReport } from './diagnostics'
 import type { SaveTarget, FileSink } from './saveTarget'
 
 /** Safe floor for a single data-channel message across implementations. */
@@ -767,11 +767,12 @@ export class Transfer {
   }
 
   private publishReport(outcome: string): void {
+    if (!DIAGNOSTICS) return
     this.diag.mark(outcome.startsWith('completed') ? 'done' : 'error')
     this.diag.stop()
     const text = this.diag.report(outcome, this.stats.bytesDone)
     storeReport(text)
-    // always in the console too, so it survives the window being dismissed
+    // console too, so it survives the window being dismissed
     console.info(`[webshare]\n${text}`)
     this.handlers.onReport?.(text)
   }
