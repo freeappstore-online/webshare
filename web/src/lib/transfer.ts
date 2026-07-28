@@ -47,8 +47,21 @@ const LOW_WATER = 512 * 1024
  */
 const HEADER = 12
 
+/**
+ * How many parallel peer connections carry the file.
+ *
+ * Throughput over one connection is its congestion window divided by the
+ * round-trip time, and on a lossy link that window collapses on every loss and
+ * never recovers — measured at 87 KB against a 169 ms RTT, which is exactly the
+ * 0.5 MB/s observed. Neither term is under the app's control, but the window is
+ * per-connection, so several of them add up. Set to 1 to go back to a single
+ * connection.
+ */
+const LINKS = 4
 /** How long to wait for the direct channel before calling it unreachable. */
 const CONNECT_TIMEOUT_MS = 15_000
+/** After the first link is up, how long to let the rest join before starting. */
+const LINK_GATHER_MS = 2500
 /**
  * How long the sender waits for the receiver to confirm it saved everything.
  * Generous: the receiver may still be flushing gigabytes to disk, or zipping,
@@ -92,6 +105,15 @@ export interface TransferHandlers {
   onReport?(text: string): void
 }
 
+/** One of the parallel connections carrying the file. */
+interface Link {
+  index: number
+  pc: RTCPeerConnection
+  channel: RTCDataChannel | null
+  /** ICE candidates that arrived before the remote description was applied. */
+  pendingIce: RTCIceCandidateInit[]
+}
+
 export class Transfer {
   readonly reqId: string
   readonly role: 'sender' | 'receiver'
@@ -100,12 +122,11 @@ export class Transfer {
   private readonly files: File[]
   private readonly target: SaveTarget | null
 
-  private pc: RTCPeerConnection | null = null
-  private channel: RTCDataChannel | null = null
+  private links: Link[] = []
   private connectTimer: ReturnType<typeof setTimeout> | undefined
   private ackTimer: ReturnType<typeof setTimeout> | undefined
-  /** ICE candidates that arrived before the remote description was applied. */
-  private pendingIce: RTCIceCandidateInit[] = []
+  private gatherTimer: ReturnType<typeof setTimeout> | undefined
+  private pumping = false
   private finished = false
   private aborted = false
   /**
@@ -178,68 +199,107 @@ export class Transfer {
 
   start(): void {
     this.diag.mark('start')
+    if (this.role === 'sender') {
+      for (let i = 0; i < LINKS; i++) this.openLink(i)
+    }
+    // the receiver builds its side as offers arrive, one per link
+    this.connectTimer = setTimeout(() => {
+      if (!this.openChannels().length) this.fail(UNREACHABLE)
+    }, CONNECT_TIMEOUT_MS)
+  }
+
+  /** Create (or fetch) the connection for one link. */
+  private openLink(index: number): Link | null {
+    const existing = this.links[index]
+    if (existing) return existing
     let pc: RTCPeerConnection
     try {
       pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
     } catch {
-      this.fail('This browser can’t open a direct connection.')
-      return
+      if (index === 0) this.fail('This browser can\u2019t open a direct connection.')
+      return null
     }
-    this.pc = pc
+    const link: Link = { index, pc, channel: null, pendingIce: [] }
+    this.links[index] = link
 
     pc.onicecandidate = (ev) => {
       if (ev.candidate) {
-        this.handlers.onSignal({ t: 'rtc-ice', reqId: this.reqId, candidate: ev.candidate.toJSON() })
+        this.handlers.onSignal({
+          t: 'rtc-ice',
+          reqId: this.reqId,
+          link: index,
+          candidate: ev.candidate.toJSON(),
+        })
       }
     }
     pc.onconnectionstatechange = () => {
-      // ICE exhausted every path — no point waiting out the timer
-      if (pc.connectionState === 'failed') this.fail(UNREACHABLE)
+      // one link failing is survivable; losing every one is not
+      if (pc.connectionState === 'failed' && !this.openChannels().length && !this.pumping) {
+        this.fail(UNREACHABLE)
+      }
     }
 
     if (this.role === 'sender') {
-      // unordered: see HEADER. Still fully reliable — SCTP only drops data if
-      // maxRetransmits/maxPacketLifeTime are set, and they are not.
       const channel = pc.createDataChannel('files', { ordered: false })
       channel.binaryType = 'arraybuffer'
-      this.bindChannel(channel)
+      this.bindChannel(link, channel)
       void (async () => {
         try {
           const offer = await pc.createOffer()
           await pc.setLocalDescription(offer)
-          this.diag.mark('offer-sent')
-          this.handlers.onSignal({ t: 'rtc-offer', reqId: this.reqId, sdp: offer.sdp ?? '' })
+          this.handlers.onSignal({
+            t: 'rtc-offer',
+            reqId: this.reqId,
+            link: index,
+            sdp: offer.sdp ?? '',
+          })
         } catch {
-          this.fail(UNREACHABLE)
+          if (index === 0) this.fail(UNREACHABLE)
         }
       })()
     } else {
       pc.ondatachannel = (ev) => {
         ev.channel.binaryType = 'arraybuffer'
-        this.bindChannel(ev.channel)
+        this.bindChannel(link, ev.channel)
       }
     }
-
-    this.connectTimer = setTimeout(() => {
-      if (this.channel?.readyState !== 'open') this.fail(UNREACHABLE)
-    }, CONNECT_TIMEOUT_MS)
+    return link
   }
 
-  private bindChannel(channel: RTCDataChannel): void {
-    this.channel = channel
+  private openChannels(): RTCDataChannel[] {
+    return this.links
+      .filter((l) => l?.channel?.readyState === 'open')
+      .map((l) => l.channel!)
+  }
+
+  private bindChannel(link: Link, channel: RTCDataChannel): void {
+    link.channel = channel
     channel.bufferedAmountLowThreshold = LOW_WATER
 
     const onOpen = () => {
       clearTimeout(this.connectTimer)
-      this.diag.mark('channel-open')
-      this.diag.noteChunk(this.chunkSize(), this.pc?.sctp?.maxMessageSize ?? 0)
-      this.diag.startSampling(
-        this.pc,
-        () => this.stats.bytesDone,
-        // sender: what's queued on the wire; receiver: what's not yet on disk
-        () => (this.role === 'sender' ? (this.channel?.bufferedAmount ?? 0) : this.pendingBytes)
-      )
-      if (this.role === 'sender') void this.pump()
+      if (this.links.filter((l) => l?.channel?.readyState === 'open').length === 1) {
+        this.diag.mark('channel-open')
+        this.diag.noteChunk(this.chunkSize(), link.pc.sctp?.maxMessageSize ?? 0)
+        this.diag.startSampling(
+          link.pc,
+          () => this.stats.bytesDone,
+          // sender: what's queued across every link; receiver: unwritten bytes
+          () =>
+            this.role === 'sender'
+              ? this.openChannels().reduce((n, c) => n + c.bufferedAmount, 0)
+              : this.pendingBytes
+        )
+      }
+      if (this.role !== 'sender' || this.pumping) return
+      // give the remaining links a moment to come up, then send over all of them
+      const ready = this.openChannels().length
+      if (ready >= LINKS) {
+        clearTimeout(this.gatherTimer)
+        this.startPump()
+      } else if (!this.gatherTimer) {
+        this.gatherTimer = setTimeout(() => this.startPump(), LINK_GATHER_MS)
+      }
     }
     // Chrome hands the receiver a channel that is *already* open, so a plain
     // `onopen` handler would never fire and this side would sit there idle.
@@ -251,51 +311,67 @@ export class Transfer {
       else void this.handleChunk(ev.data as ArrayBuffer)
     }
     channel.onclose = () => {
-      // a close before 'done' means the peer vanished mid-transfer
-      if (!this.finished && !this.aborted && !this.sawDone) this.fail('Connection lost')
+      // only a total loss of connectivity is fatal
+      if (this.finished || this.aborted || this.sawDone) return
+      if (!this.openChannels().length) this.fail('Connection lost')
     }
+  }
+
+  private startPump(): void {
+    if (this.pumping || this.aborted || this.finished) return
+    this.pumping = true
+    clearTimeout(this.gatherTimer)
+    this.diag.noteLinks(this.openChannels().length)
+    void this.pump()
   }
 
   // --- signaling from the peer ---------------------------------------------
 
-  async handleOffer(sdp: string): Promise<void> {
-    if (!this.pc) return
+  async handleOffer(index: number, sdp: string): Promise<void> {
+    const link = this.openLink(index)
+    if (!link) return
     try {
-      await this.pc.setRemoteDescription({ type: 'offer', sdp })
-      await this.flushIce()
-      const answer = await this.pc.createAnswer()
-      await this.pc.setLocalDescription(answer)
-      this.diag.mark('answer-sent')
-      this.handlers.onSignal({ t: 'rtc-answer', reqId: this.reqId, sdp: answer.sdp ?? '' })
+      await link.pc.setRemoteDescription({ type: 'offer', sdp })
+      await this.flushIce(link)
+      const answer = await link.pc.createAnswer()
+      await link.pc.setLocalDescription(answer)
+      if (index === 0) this.diag.mark('answer-sent')
+      this.handlers.onSignal({
+        t: 'rtc-answer',
+        reqId: this.reqId,
+        link: index,
+        sdp: answer.sdp ?? '',
+      })
     } catch {
-      this.fail(UNREACHABLE)
+      if (index === 0 && !this.openChannels().length) this.fail(UNREACHABLE)
     }
   }
 
-  async handleAnswer(sdp: string): Promise<void> {
-    if (!this.pc) return
+  async handleAnswer(index: number, sdp: string): Promise<void> {
+    const link = this.links[index]
+    if (!link) return
     try {
-      await this.pc.setRemoteDescription({ type: 'answer', sdp })
-      this.diag.mark('answer-applied')
-      await this.flushIce()
+      await link.pc.setRemoteDescription({ type: 'answer', sdp })
+      await this.flushIce(link)
     } catch {
-      this.fail(UNREACHABLE)
+      if (index === 0 && !this.openChannels().length) this.fail(UNREACHABLE)
     }
   }
 
-  async handleIce(candidate: RTCIceCandidateInit): Promise<void> {
-    if (!this.pc) return
-    if (!this.pc.remoteDescription) {
-      this.pendingIce.push(candidate)
+  async handleIce(index: number, candidate: RTCIceCandidateInit): Promise<void> {
+    const link = this.links[index]
+    if (!link) return
+    if (!link.pc.remoteDescription) {
+      link.pendingIce.push(candidate)
       return
     }
-    await this.pc.addIceCandidate(candidate).catch(() => {})
+    await link.pc.addIceCandidate(candidate).catch(() => {})
   }
 
-  private async flushIce(): Promise<void> {
-    const queued = this.pendingIce
-    this.pendingIce = []
-    for (const c of queued) await this.pc?.addIceCandidate(c).catch(() => {})
+  private async flushIce(link: Link): Promise<void> {
+    const queued = link.pendingIce
+    link.pendingIce = []
+    for (const c of queued) await link.pc.addIceCandidate(c).catch(() => {})
   }
 
   // --- sending -------------------------------------------------------------
@@ -303,8 +379,20 @@ export class Transfer {
   private chunkSize(): number {
     // browsers report what SCTP negotiated (Chrome: 256 KB); 16 KB is only the
     // universally-safe floor, and using it needlessly quadruples message count
-    const max = this.pc?.sctp?.maxMessageSize ?? 0
+    const max = this.links[0]?.pc.sctp?.maxMessageSize ?? 0
     return max > RTC_CHUNK ? Math.min(max, MAX_RTC_CHUNK) : RTC_CHUNK
+  }
+
+  /** The open channel with the smallest backlog. */
+  private leastBusy(): RTCDataChannel | null {
+    const open = this.openChannels()
+    if (!open.length) return null
+    return open.reduce((a, b) => (a.bufferedAmount <= b.bufferedAmount ? a : b))
+  }
+
+  /** Any open channel — control messages don't care which link carries them. */
+  private control(): RTCDataChannel | null {
+    return this.openChannels()[0] ?? null
   }
 
   /** Resolves once the channel has worked its backlog off. */
@@ -319,12 +407,12 @@ export class Transfer {
   }
 
   private async pump(): Promise<void> {
-    const channel = this.channel
-    if (!channel) return
     const stale = () => this.aborted || this.finished
     const files = this.files
     try {
-      channel.send(
+      const control = this.control()
+      if (!control) return
+      control.send(
         JSON.stringify({
           t: 'manifest',
           files: files.map((f) => ({ n: f.name, s: f.size })),
@@ -360,15 +448,23 @@ export class Transfer {
 
           for (let p = 0; p < block.byteLength; p += chunk) {
             if (stale()) return
-            if (channel.bufferedAmount > HIGH_WATER) await this.drain(channel)
-            if (stale()) return
+            // send down whichever link has the least queued: each has its own
+            // congestion window, so the fastest one naturally takes the most
+            let out = this.leastBusy()
+            if (!out) return
+            if (out.bufferedAmount > HIGH_WATER / LINKS) {
+              await this.drain(out)
+              if (stale()) return
+              out = this.leastBusy()
+              if (!out) return
+            }
             const end = Math.min(p + chunk, block.byteLength)
             const payload = new Uint8Array(HEADER + (end - p))
             const head = new DataView(payload.buffer)
             head.setUint32(0, i)
             head.setFloat64(4, off + p)
             payload.set(new Uint8Array(block, p, end - p), HEADER)
-            channel.send(payload.buffer)
+            out.send(payload.buffer)
             if (!this.sawFirstByte) { this.sawFirstByte = true; this.diag.mark('first-byte') }
             this.stats.bytesDone += end - p
             this.emit()
@@ -380,7 +476,7 @@ export class Transfer {
       }
 
       if (stale()) return
-      channel.send(JSON.stringify({ t: 'done' }))
+      this.control()?.send(JSON.stringify({ t: 'done' }))
       // not finished yet — only the receiver can say the files actually landed
       this.diag.mark('done-sent')
       this.ackTimer = setTimeout(() => {
@@ -553,7 +649,7 @@ export class Transfer {
       // tell the sender before we settle: this is what lets it report "Sent"
       // truthfully, and it must go out while the channel is still open
       try {
-        this.channel?.send(JSON.stringify({ t: 'ack' }))
+        this.control()?.send(JSON.stringify({ t: 'ack' }))
       } catch {
         /* channel already gone; the sender will time out and say so */
       }
@@ -606,7 +702,7 @@ export class Transfer {
     if (this.finished || this.aborted) return
     this.aborted = true
     try {
-      this.channel?.send(JSON.stringify({ t: 'abort' }))
+      this.control()?.send(JSON.stringify({ t: 'abort' }))
     } catch {
       /* channel already gone */
     }
@@ -657,10 +753,14 @@ export class Transfer {
   private teardown(): void {
     clearTimeout(this.connectTimer)
     clearTimeout(this.ackTimer)
-    this.channel?.close()
-    this.channel = null
-    this.pc?.close()
-    this.pc = null
+    clearTimeout(this.gatherTimer)
+    for (const link of this.links) {
+      if (!link) continue
+      link.channel?.close()
+      link.channel = null
+      link.pc.close()
+    }
+    this.links = []
   }
 
   /** Component unmount / room teardown — stop without notifying anyone. */

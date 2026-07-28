@@ -187,11 +187,11 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
         startTransfer({ reqId: m.reqId, peer: staged.peer, dir: 'send', files: staged.files })
       }
     } else if (m?.t === 'rtc-offer' && typeof m.sdp === 'string') {
-      void transfersRef.current.get(m.reqId)?.transfer.handleOffer(m.sdp)
+      void transfersRef.current.get(m.reqId)?.transfer.handleOffer(m.link ?? 0, m.sdp)
     } else if (m?.t === 'rtc-answer' && typeof m.sdp === 'string') {
-      void transfersRef.current.get(m.reqId)?.transfer.handleAnswer(m.sdp)
+      void transfersRef.current.get(m.reqId)?.transfer.handleAnswer(m.link ?? 0, m.sdp)
     } else if (m?.t === 'rtc-ice' && m.candidate) {
-      void transfersRef.current.get(m.reqId)?.transfer.handleIce(m.candidate)
+      void transfersRef.current.get(m.reqId)?.transfer.handleIce(m.link ?? 0, m.candidate)
     } else if (m?.t === 'xfer-abort') {
       transfersRef.current.get(m.reqId)?.transfer.remoteAbort()
     } else if (m?.t === 'share-cancel') {

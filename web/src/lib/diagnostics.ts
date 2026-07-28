@@ -85,6 +85,13 @@ export class TransferDiag {
     this.readMs += ms
   }
 
+  private linkCount = 1
+
+  /** How many parallel connections ended up carrying the file. */
+  noteLinks(n: number): void {
+    this.linkCount = n
+  }
+
   noteChunk(chunk: number, maxMessage: number): void {
     this.chunk = chunk
     this.maxMessage = maxMessage
@@ -288,6 +295,7 @@ export class TransferDiag {
     push('remote candidate', `${this.path.remoteType ?? '?'} ${this.path.remoteAddress ?? ''}`.trim())
     push('protocol', this.path.protocol)
     push('network', this.path.networkType)
+    push('links', this.linkCount)
     push('chunk size', this.chunk ? `${(this.chunk / 1024).toFixed(0)} KB` : undefined)
     push('sctp max msg', this.maxMessage ? `${(this.maxMessage / 1024).toFixed(0)} KB` : undefined)
 

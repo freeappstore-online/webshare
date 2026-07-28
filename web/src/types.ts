@@ -48,9 +48,11 @@ export type PeerMsg =
   | { t: 'share-resp'; reqId: string; accept: boolean }
   | { t: 'share-cancel'; reqId: string }
   // --- transfer setup: only the handshake goes through the worker, never data ---
-  | { t: 'rtc-offer'; reqId: string; sdp: string }
-  | { t: 'rtc-answer'; reqId: string; sdp: string }
-  | { t: 'rtc-ice'; reqId: string; candidate: RTCIceCandidateInit }
+  // `link` indexes one of several parallel connections; each carries its own
+  // congestion window, which is the only way past cwnd/RTT on a lossy link
+  | { t: 'rtc-offer'; reqId: string; link: number; sdp: string }
+  | { t: 'rtc-answer'; reqId: string; link: number; sdp: string }
+  | { t: 'rtc-ice'; reqId: string; link: number; candidate: RTCIceCandidateInit }
   /** Either side aborted mid-transfer. */
   | { t: 'xfer-abort'; reqId: string }
 
