@@ -6,7 +6,7 @@ import { EditProfileWindow } from './components/EditProfileWindow'
 import { FloatingWindow } from './components/FloatingWindow'
 import { IncomingShare } from './components/IncomingShare'
 import { Dropdown } from './components/Dropdown'
-import { CloseIcon, FolderToFilesIcon, TriangleInfoIcon, UploadIcon, ViewIconsIcon, ViewListIcon, WebshareLogo } from './components/icons'
+import { CloseIcon, TriangleInfoIcon, UploadIcon, ViewIconsIcon, ViewListIcon, WebshareLogo } from './components/icons'
 import { ProfileForm } from './components/ProfileForm'
 import { ReceiveWindow } from './components/ReceiveWindow'
 import { ShareCodeWindow } from './components/ShareCodeWindow'
@@ -15,7 +15,6 @@ import { useProfile } from './hooks/useProfile'
 import { withThemeFade } from './lib/themeFade'
 import { useShareRoom } from './hooks/useShareRoom'
 import { mergeFiles, readEntry } from './lib/files'
-import { BLOCKED_MESSAGE, FolderPickError, canPickFolderHandle, pickFolderToSend } from './lib/pickFolder'
 import { generateShareCode, isShareCode } from './lib/shareCode'
 import { FilesPage } from './pages/FilesPage'
 import { SharePage } from './pages/SharePage'
@@ -117,32 +116,16 @@ export default function App() {
   const [filesToShare, setFilesToShare] = useState<File[]>([])
   const [dragOver, setDragOver] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
-  const folderInput = useRef<HTMLInputElement>(null)
-  const [folderError, setFolderError] = useState<string | null>(null)
-  const [readingFolder, setReadingFolder] = useState(false)
+  // a dropped folder can't be sent — say so in a toast rather than dropping it
+  // on the floor (the add-files window can't host this: staging the *other*
+  // dropped files closes it again straight away)
+  const [folderNotice, setFolderNotice] = useState<string | null>(null)
+  useEffect(() => {
+    if (!folderNotice) return
+    const t = setTimeout(() => setFolderNotice(null), 7000)
+    return () => clearTimeout(t)
+  }, [folderNotice])
   useEffect(() => { setAddPickerOpen(false) }, [files.length])
-  useEffect(() => { if (addPickerOpen) setFolderError(null) }, [addPickerOpen])
-
-  /**
-   * Prefer the File System Access picker: it grants a directory handle we walk
-   * ourselves, instead of making the browser slurp the whole tree and ask to
-   * "upload N files". Browsers without it fall back to the hidden
-   * webkitdirectory input.
-   */
-  const addFolder = () => {
-    setFolderError(null)
-    if (!canPickFolderHandle) {
-      folderInput.current?.click()
-      return
-    }
-    setReadingFolder(true)
-    void pickFolderToSend()
-      .then((folder) => addFilesBatched([folder]))
-      .catch((err: unknown) => {
-        if (err instanceof FolderPickError && !err.cancelled) setFolderError(err.message)
-      })
-      .finally(() => setReadingFolder(false))
-  }
   useEffect(() => {
     const onResize = () => setSharePerRowViewport(getDefaultSharePerRow(window.innerWidth))
     window.addEventListener('resize', onResize)
@@ -223,18 +206,27 @@ export default function App() {
         addFilesBatched([...e.dataTransfer!.files])
         return
       }
-      // Stream: push files into the queue the exact millisecond they are
-      // discovered in the directory tree without waiting for the whole folder.
+      // Stream files into the queue as they're discovered. Folders are skipped
+      // and named back to the user — silently ignoring them was the old bug.
       void (async () => {
+        const skipped: string[] = []
         await Promise.all(entries.map(entry =>
-          readEntry(entry, (file) => {
-            fileQueue.current.push(file)
-            if (!processing.current) {
-              processing.current = true
-              processQueue()
-            }
-          })
+          readEntry(
+            entry,
+            (file) => {
+              fileQueue.current.push(file)
+              if (!processing.current) {
+                processing.current = true
+                processQueue()
+              }
+            },
+            (name) => skipped.push(name),
+          )
         ))
+        if (skipped.length) {
+          const which = skipped.length === 1 ? `“${skipped[0]}”` : `${skipped.length} folders`
+          setFolderNotice(`${which} wasn't added — folders can't be sent. Zip it first and send the zip.`)
+        }
       })()
     }
     window.addEventListener('dragover', onDragOver)
@@ -378,51 +370,16 @@ export default function App() {
               <UploadIcon size={26} />
               <span className="text-sm font-semibold text-[var(--ink)]">Add files</span>
             </button>
-            <button
-              onClick={addFolder}
-              disabled={readingFolder}
-              className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[1.25rem] border-2 border-dashed py-2.5 px-6 text-[var(--muted)] transition-none disabled:opacity-60"
-              style={{ borderColor: 'var(--line-strong)', background: 'var(--paper-deep)' }}
-            >
-              <FolderToFilesIcon size={26} />
-              <span className="text-sm font-semibold text-[var(--ink)]">
-                {readingFolder ? 'Reading folder…' : 'Add a folder'}
-              </span>
-            </button>
           </div>
-          {folderError === BLOCKED_MESSAGE ? (
-            // The picker is a dead end for this folder, so stop offering it and
-            // show the route that does work — dragging isn't blocklisted.
-            <div className="flex flex-col gap-2">
-              <p className="flex items-start gap-1.5 px-1 text-xs text-[var(--error)]">
-                <TriangleInfoIcon size={18} className="shrink-0" />
-                {folderError}
-              </p>
-              <div
-                className="flex flex-col items-center justify-center gap-1.5 rounded-[1.25rem] border-2 border-dashed py-4 px-4 text-center transition-none"
-                style={{
-                  borderColor: dragOver ? 'var(--accent)' : 'var(--line-strong)',
-                  background: dragOver ? 'var(--accent-gradient)' : 'var(--paper-deep)',
-                }}
-              >
-                <FolderToFilesIcon size={26} />
-                <span className="text-sm font-semibold text-[var(--ink)]">
-                  {dragOver ? 'Drop it to add' : 'Drag the folder here instead'}
-                </span>
-                <span className="text-xs text-[var(--muted)]">
-                  Dragging uses a different permission Chrome doesn't restrict
-                </span>
-              </div>
-            </div>
-          ) : folderError ? (
-            <p className="flex items-start gap-1.5 px-1 text-xs text-[var(--error)]">
+          {folderNotice ? (
+            <p className="flex items-start gap-1.5 px-1 text-xs text-[var(--warning)]">
               <TriangleInfoIcon size={18} className="shrink-0" />
-              {folderError}
+              {folderNotice}
             </p>
           ) : (
-            <p className="flex items-center gap-1.5 px-1 text-xs opacity-55 text-[var(--ink)]">
+            <p className="flex items-start gap-1.5 px-1 text-xs opacity-55 text-[var(--ink)]">
               <TriangleInfoIcon size={18} className="shrink-0" />
-              Drag &amp; drop works too — and it's the way in if a folder is blocked
+              Folders can't be sent — zip one first and send the zip
             </p>
           )}
           <button
@@ -471,7 +428,6 @@ export default function App() {
           filesToShare={filesToShare}
           setFilesToShare={setFilesToShare}
           fileInput={fileInput}
-          folderInput={folderInput}
           dragOver={dragOver}
           shareView={shareView}
           sharePerRow={sharePerRow}
@@ -516,6 +472,32 @@ export default function App() {
         )}
       </FloatingWindow>
 
+      {folderNotice && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-24 z-40 flex justify-center px-4">
+          <div
+            className="pointer-events-auto flex max-w-md items-start gap-2 rounded-[var(--radius)] px-3.5 py-3"
+            style={{
+              background: 'var(--float-bg)',
+              border: '1px solid var(--float-border)',
+              boxShadow: '0 12px 32px rgba(0,0,0,0.35)',
+              animation: 'ws-drop-in 260ms ease-in-out both',
+            }}
+          >
+            <span className="mt-px shrink-0 text-[var(--warning)]">
+              <TriangleInfoIcon size={18} />
+            </span>
+            <p className="text-xs text-[var(--ink)]">{folderNotice}</p>
+            <button
+              onClick={() => setFolderNotice(null)}
+              aria-label="Dismiss"
+              className="-mr-1 -mt-1 shrink-0 cursor-pointer rounded-full p-1 text-[var(--muted)] transition-colors hover:bg-[var(--line-strong)] hover:text-[var(--ink)]"
+            >
+              <CloseIcon size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
       <BuildInfo />
       {/* safe-area spacer, only renders when installed as a PWA */}
       <Footer />
@@ -536,7 +518,6 @@ function Main({
   filesToShare,
   setFilesToShare,
   fileInput,
-  folderInput,
   dragOver,
   shareView,
   sharePerRow,
@@ -561,7 +542,6 @@ function Main({
   filesToShare: File[]
   setFilesToShare: (files: File[]) => void
   fileInput: RefObject<HTMLInputElement | null>
-  folderInput: RefObject<HTMLInputElement | null>
   dragOver: boolean
   shareView: ViewMode
   sharePerRow: number
@@ -646,7 +626,6 @@ function Main({
           onOpenAddPicker={onOpenAddPicker}
           onReceive={() => setReceiveOpen(true)}
           inputRef={fileInput}
-          folderInputRef={folderInput}
           dragOver={dragOver}
           discoverable={discoverable}
           onDiscoverableChange={onDiscoverableChange}

@@ -14,7 +14,6 @@
  *   either → { t:'abort' }
  */
 
-import { expandForTransfer, type FolderEntry } from './files'
 import type { SaveTarget, FileSink } from './saveTarget'
 
 /** RTCDataChannel implementations cap a single message at 16 KiB in practice. */
@@ -97,8 +96,6 @@ export class Transfer {
 
   private readonly handlers: TransferHandlers
   private readonly files: File[]
-  /** Sender: the staged items flattened to real files + destination paths. */
-  private outgoing: FolderEntry[] = []
   private readonly target: SaveTarget | null
   /** Relay transport: pushes an `xfer-data` payload through the worker. */
   private readonly relaySend: (payload: { c?: unknown; b?: string }) => void
@@ -162,11 +159,8 @@ export class Transfer {
     this.handlers = opts.handlers
 
     if (this.role === 'sender') {
-      // resolved once: a staged folder is one icon but many files, and the
-      // progress/manifest numbers have to describe what actually gets sent
-      this.outgoing = expandForTransfer(this.files)
-      this.stats.filesTotal = this.outgoing.length
-      this.stats.bytesTotal = this.outgoing.reduce((n, e) => n + e.file.size, 0)
+      this.stats.filesTotal = this.files.length
+      this.stats.bytesTotal = this.files.reduce((n, f) => n + f.size, 0)
     }
   }
 
@@ -435,23 +429,22 @@ export class Transfer {
     // than interleaving its chunks with the new one's
     const gen = this.generation
     const stale = () => this.aborted || gen !== this.generation
-    const files = this.outgoing
+    const files = this.files
     try {
       wire.send(
         JSON.stringify({
           t: 'manifest',
-          files: files.map((e) => ({ n: e.path, s: e.file.size })),
+          files: files.map((f) => ({ n: f.name, s: f.size })),
           bytes: this.stats.bytesTotal,
         })
       )
 
       for (let i = 0; i < files.length; i++) {
         if (stale()) return
-        const file = files[i].file
-        // `n` is the destination *path*, so folder structure survives the trip
-        this.stats.currentName = files[i].path
+        const file = files[i]
+        this.stats.currentName = file.name
         this.emit()
-        wire.send(JSON.stringify({ t: 'file', i, n: files[i].path }))
+        wire.send(JSON.stringify({ t: 'file', i, n: file.name }))
 
         // fixed for the whole file — the transport can't change once we're
         // streaming (a restart replaces this loop outright), so it's stable

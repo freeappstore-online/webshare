@@ -13,7 +13,7 @@ import {
   ViewListIcon,
 } from '../components/icons'
 import { PeerAvatar } from '../components/PeerAvatar'
-import { fileExt, fileKey, fileKind, makeFolderItem } from '../lib/files'
+import { fileExt, fileKey, fileKind } from '../lib/files'
 import { docPreview, fileThumb, type DocPreview } from '../lib/thumbs'
 import type { Profile } from '../types'
 
@@ -29,8 +29,6 @@ interface FilesPageProps {
   onReceive: () => void
   /** owned by App so the nav bar's add-files button can open the picker */
   inputRef: RefObject<HTMLInputElement | null>
-  /** owned by App so the nav bar's add-folder button can open the picker */
-  folderInputRef: RefObject<HTMLInputElement | null>
   /** drag detection is full-screen (window listeners in App) */
   dragOver: boolean
   discoverable: boolean
@@ -52,7 +50,7 @@ const VIEWS: Array<{ key: ViewMode; label: string; Icon: typeof ViewListIcon }> 
 ]
 
 /** Main page: who you are, stage files to share, then pick a recipient. */
-export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, onEditProfile, onOpenAddPicker, onReceive, inputRef: input, folderInputRef: folderInput, dragOver, discoverable, onDiscoverableChange }: FilesPageProps) {
+export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, onEditProfile, onOpenAddPicker, onReceive, inputRef: input, dragOver, discoverable, onDiscoverableChange }: FilesPageProps) {
   const [view, setView] = useState<ViewMode>(() => {
     const stored = localStorage.getItem(VIEW_KEY)
     return stored === 'icons' || stored === 'list' ? stored : 'icons'
@@ -294,29 +292,6 @@ export function FilesPage({ profile, files, onFilesChange, onAddFiles, onShare, 
           e.target.value = ''
         }}
       />
-      <input
-        ref={folderInput}
-        type="file"
-        multiple
-        className="hidden"
-        {...{ webkitdirectory: '' }}
-        onChange={(e) => {
-          const picked = e.target.files
-          if (picked?.length) {
-            const all = Array.from(picked)
-            // webkitRelativePath is "<folder>/sub/file.ext" — the first segment
-            // is the folder itself, which the placeholder already carries
-            const root = all[0].webkitRelativePath?.split('/')[0] || all[0].name
-            const entries = all.map((file) => ({
-              file,
-              path: file.webkitRelativePath?.split('/').slice(1).join('/') || file.name,
-            }))
-            onAddFiles([makeFolderItem(root, entries)])
-          }
-          e.target.value = ''
-        }}
-      />
-
       {/* big dropzone only while empty; once files are staged it shrinks into the toolbar */}
       {!hasFiles && (
         <button
