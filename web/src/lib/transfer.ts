@@ -36,9 +36,24 @@ const WRITE_BLOCK = 1024 * 1024
  * Ten updates a second is smooth to the eye and costs nothing.
  */
 const PROGRESS_INTERVAL_MS = 100
-/** Pause reading while this many bytes are still queued on the wire. */
-const HIGH_WATER = 4 * 1024 * 1024
-const LOW_WATER = 512 * 1024
+/**
+ * How much to keep queued on a link, as time rather than bytes.
+ *
+ * A fixed byte budget is wrong at both ends of the range. The 4 MB this used to
+ * hold is a fifth of a second on a fast link and eight seconds on a slow one —
+ * and eight seconds of data in a queue nothing can drain is the sender causing
+ * its own bufferbloat: round-trip time climbs into seconds, the delay triggers
+ * loss, and the window collapses. That was visible as a transfer starting at a
+ * normal speed, stalling hard for ten seconds with RTT at 4.8 s, then settling
+ * once the queue finally drained.
+ *
+ * Half a second is enough to keep the link busy across a scheduling hiccup
+ * without building a queue anyone waits on.
+ */
+const QUEUE_SECONDS = 0.5
+const MIN_QUEUE = 256 * 1024
+const MAX_QUEUE = 4 * 1024 * 1024
+const LOW_WATER = 128 * 1024
 /**
  * Every binary message carries where it belongs: [uint32 file][float64 offset].
  * That is what lets the channel be unordered — a chunk held up by a lost packet
@@ -132,6 +147,7 @@ export class Transfer {
   private ackTimer: ReturnType<typeof setTimeout> | undefined
   private gatherTimer: ReturnType<typeof setTimeout> | undefined
   private pumping = false
+  private pumpStartedAt = 0
   private finished = false
   private aborted = false
   /**
@@ -322,9 +338,24 @@ export class Transfer {
     }
   }
 
+  /**
+   * Per-link queue ceiling, sized from throughput so far. Starts small: at the
+   * beginning there is no measurement, and guessing high is what caused the
+   * overshoot in the first place.
+   */
+  private queueLimit(): number {
+    const links = Math.max(1, this.openChannels().length)
+    const secs = (performance.now() - this.pumpStartedAt) / 1000
+    if (secs < 1 || this.stats.bytesDone <= 0) return MIN_QUEUE / links
+    const rate = this.stats.bytesDone / secs
+    const budget = Math.min(MAX_QUEUE, Math.max(MIN_QUEUE, rate * QUEUE_SECONDS))
+    return budget / links
+  }
+
   private startPump(): void {
     if (this.pumping || this.aborted || this.finished) return
     this.pumping = true
+    this.pumpStartedAt = performance.now()
     clearTimeout(this.gatherTimer)
     void this.pump()
   }
@@ -456,7 +487,7 @@ export class Transfer {
             // congestion window, so the fastest one naturally takes the most
             let out = this.leastBusy()
             if (!out) return
-            if (out.bufferedAmount > HIGH_WATER / LINKS) {
+            if (out.bufferedAmount > this.queueLimit()) {
               await this.drain(out)
               if (stale()) return
               out = this.leastBusy()
