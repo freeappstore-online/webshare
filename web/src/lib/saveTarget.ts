@@ -12,7 +12,9 @@
  */
 
 interface FsWritable {
-  write(data: BufferSource | Blob): Promise<void>
+  write(
+    data: BufferSource | Blob | { type: 'write'; position: number; data: BufferSource }
+  ): Promise<void>
   close(): Promise<void>
   abort?(): Promise<void>
 }
@@ -36,9 +38,14 @@ type Picker = {
 
 const picker = window as unknown as Picker
 
-/** One open file being written to; `abort` discards a partially received file. */
+/**
+ * One open file being written to.
+ *
+ * Writes carry an explicit position because chunks travel unordered — a lost
+ * packet must not hold up the ones behind it, so they can land in any order.
+ */
 export interface FileSink {
-  write(chunk: ArrayBuffer): Promise<void>
+  write(chunk: ArrayBuffer, position: number): Promise<void>
   close(): Promise<void>
   abort(): Promise<void>
 }
@@ -46,8 +53,8 @@ export interface FileSink {
 export interface SaveTarget {
   /** Human-readable destination, shown when the transfer finishes. */
   readonly label: string
-  /** Open the next incoming file for writing. */
-  create(name: string): Promise<FileSink>
+  /** Open the next incoming file for writing; `size` is its final length. */
+  create(name: string, size: number): Promise<FileSink>
   /** All files received — flush anything still pending (the fallback's download). */
   finish(): Promise<void>
   /** Transfer aborted — drop whatever was buffered. */
@@ -114,7 +121,7 @@ function directoryTarget(dir: FsDirHandle): SaveTarget {
       const writable = await handle.createWritable()
       const owner = parent
       return {
-        write: (chunk) => writable.write(chunk),
+        write: (chunk, position) => writable.write({ type: 'write', position, data: chunk }),
         close: () => writable.close(),
         async abort() {
           // leave no half-written file behind
@@ -135,7 +142,7 @@ function singleFileTarget(handle: FsFileHandle): SaveTarget {
     async create() {
       const writable = await handle.createWritable()
       return {
-        write: (chunk) => writable.write(chunk),
+        write: (chunk, position) => writable.write({ type: 'write', position, data: chunk }),
         close: () => writable.close(),
         abort: async () => {
           await writable.abort?.().catch(() => {})
@@ -155,22 +162,20 @@ function memoryTarget(): SaveTarget {
   let files: { name: string; blob: Blob }[] = []
   return {
     label: 'your downloads',
-    async create(path) {
-      const parts: ArrayBuffer[] = []
+    async create(path, size) {
+      // chunks arrive in any order, so lay them into one buffer by position
+      const whole = new Uint8Array(size)
       const { dirs, name } = safeSegments(path)
       // JSZip builds the directories from the entry name
       const final = [...dirs, name].join('/')
       return {
-        async write(chunk) {
-          parts.push(chunk)
+        async write(chunk, position) {
+          whole.set(new Uint8Array(chunk), position)
         },
         async close() {
-          files.push({ name: final, blob: new Blob(parts) })
-          parts.length = 0
+          files.push({ name: final, blob: new Blob([whole]) })
         },
-        async abort() {
-          parts.length = 0
-        },
+        async abort() {},
       }
     },
     async finish() {

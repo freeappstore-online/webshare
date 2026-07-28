@@ -39,6 +39,14 @@ const PROGRESS_INTERVAL_MS = 100
 /** Pause reading while this many bytes are still queued on the wire. */
 const HIGH_WATER = 4 * 1024 * 1024
 const LOW_WATER = 512 * 1024
+/**
+ * Every binary message carries where it belongs: [uint32 file][float64 offset].
+ * That is what lets the channel be unordered — a chunk held up by a lost packet
+ * no longer holds up the ones behind it, because none of them need to arrive in
+ * any particular order to be written correctly.
+ */
+const HEADER = 12
+
 /** How long to wait for the direct channel before calling it unreachable. */
 const CONNECT_TIMEOUT_MS = 15_000
 /**
@@ -107,17 +115,29 @@ export class Transfer {
    */
   private sawDone = false
 
-  // receiver-side write state
-  private sink: FileSink | null = null
+  // receiver-side write state. Chunks arrive unordered and can belong to
+  // different files, so sinks are kept per index and completion is decided by
+  // counting bytes against the manifest rather than by any message order.
+  private sinks = new Map<number, FileSink>()
+  private opening = new Map<number, Promise<FileSink | null>>()
+  private received: number[] = []
   private manifest: ManifestEntry[] = []
+  private sawAllBytes = false
   /**
    * Writes must happen strictly in order, but messages arrive faster than the
    * disk drains — chain every write onto a single promise queue.
    */
   private queue: Promise<void> = Promise.resolve()
   /** Chunks held back so the disk sees one big write instead of hundreds. */
-  private pending: ArrayBuffer[] = []
+  private pending: { index: number; offset: number; body: ArrayBuffer }[] = []
   private pendingBytes = 0
+  private closed = new Set<number>()
+  /**
+   * Chunks that arrived before the manifest. Nothing orders the manifest ahead
+   * of the data any more, so the first chunks can and do overtake it — they are
+   * held here rather than dropped, and replayed once their sizes are known.
+   */
+  private early: ArrayBuffer[] = []
   private lastEmit = 0
   private readonly diag: TransferDiag
   private sawFirstByte = false
@@ -178,7 +198,9 @@ export class Transfer {
     }
 
     if (this.role === 'sender') {
-      const channel = pc.createDataChannel('files', { ordered: true })
+      // unordered: see HEADER. Still fully reliable — SCTP only drops data if
+      // maxRetransmits/maxPacketLifeTime are set, and they are not.
+      const channel = pc.createDataChannel('files', { ordered: false })
       channel.binaryType = 'arraybuffer'
       this.bindChannel(channel)
       void (async () => {
@@ -315,7 +337,6 @@ export class Transfer {
         const file = files[i]
         this.stats.currentName = file.name
         this.emit(true)
-        channel.send(JSON.stringify({ t: 'file', i, n: file.name }))
 
         const chunk = this.chunkSize()
         // Read in big blocks (a disk round trip per 16 KB would cost far more
@@ -342,14 +363,18 @@ export class Transfer {
             if (channel.bufferedAmount > HIGH_WATER) await this.drain(channel)
             if (stale()) return
             const end = Math.min(p + chunk, block.byteLength)
-            channel.send(block.slice(p, end))
+            const payload = new Uint8Array(HEADER + (end - p))
+            const head = new DataView(payload.buffer)
+            head.setUint32(0, i)
+            head.setFloat64(4, off + p)
+            payload.set(new Uint8Array(block, p, end - p), HEADER)
+            channel.send(payload.buffer)
             if (!this.sawFirstByte) { this.sawFirstByte = true; this.diag.mark('first-byte') }
             this.stats.bytesDone += end - p
             this.emit()
           }
         }
 
-        channel.send(JSON.stringify({ t: 'file-end', i }))
         this.stats.filesDone++
         this.emit(true)
       }
@@ -375,39 +400,24 @@ export class Transfer {
     const msg = raw as { t?: string; files?: ManifestEntry[]; bytes?: number; n?: string }
     if (msg?.t === 'manifest') {
       this.manifest = Array.isArray(msg.files) ? msg.files : []
+      this.received = this.manifest.map(() => 0)
       this.stats.filesTotal = this.manifest.length
       this.stats.bytesTotal = Number(msg.bytes) || this.manifest.reduce((n, f) => n + f.s, 0)
       this.emit(true)
-    } else if (msg?.t === 'file') {
-      const name = typeof msg.n === 'string' ? msg.n : 'file'
-      this.stats.currentName = name
-      this.emit(true)
-      // serialize opening against the chunk queue below
-      this.enqueue(async () => {
-        this.sink = this.target ? await this.target.create(name) : null
-      })
-    } else if (msg?.t === 'file-end') {
-      this.flushPending()
-      this.enqueue(async () => {
-        await this.sink?.close()
-        this.sink = null
-        this.stats.filesDone++
-        this.emit(true)
-      })
+      // now that sizes are known, the chunks that beat the manifest can land
+      const held = this.early
+      this.early = []
+      for (const chunk of held) void this.handleChunk(chunk)
+      // an empty file never gets a chunk, so nothing else would ever create it
+      for (let i = 0; i < this.manifest.length; i++) {
+        if (this.manifest[i].s === 0) this.closeFile(i)
+      }
+      this.checkAllReceived()
     } else if (msg?.t === 'done') {
+      // only says the sender has finished handing everything to the wire;
+      // chunks may still be in flight, so completion waits on the byte count
       this.sawDone = true
-      this.flushPending()
-      this.enqueue(async () => {
-        await this.target?.finish()
-        // tell the sender before we settle: this is what lets it report "Sent"
-        // truthfully, and it must go out while the channel is still open
-        try {
-          this.channel?.send(JSON.stringify({ t: 'ack' }))
-        } catch {
-          /* channel already gone; the sender will time out and say so */
-        }
-        this.complete()
-      })
+      this.checkAllReceived()
     } else if (msg?.t === 'ack') {
       clearTimeout(this.ackTimer)
       this.complete()
@@ -418,31 +428,136 @@ export class Transfer {
 
   private async handleChunk(buf: ArrayBuffer): Promise<void> {
     if (this.aborted || this.finished) return
+    if (buf.byteLength < HEADER) return
     if (!this.sawFirstByte) { this.sawFirstByte = true; this.diag.mark('first-byte') }
+
+    const head = new DataView(buf, 0, HEADER)
+    const index = head.getUint32(0)
+    const offset = head.getFloat64(4)
+    // no manifest yet: hold on to it rather than dropping it on the floor
+    if (!this.manifest.length) {
+      // bounded, so a peer that never sends a manifest can't exhaust memory
+      if (this.early.length < 256) this.early.push(buf)
+      return
+    }
+    const entry = this.manifest[index]
+    // a chunk for a file we have no manifest entry for is not writable
+    if (!entry) return
+    const body = buf.slice(HEADER)
+    if (offset < 0 || offset + body.byteLength > entry.s) return
+
     // count on arrival: progress should track the transfer, not the disk
-    this.stats.bytesDone += buf.byteLength
+    this.stats.bytesDone += body.byteLength
+    this.received[index] = (this.received[index] ?? 0) + body.byteLength
     this.emit()
-    this.pending.push(buf)
-    this.pendingBytes += buf.byteLength
+
+    this.pending.push({ index, offset, body })
+    this.pendingBytes += body.byteLength
     if (this.pendingBytes >= WRITE_BLOCK) this.flushPending()
+    if (this.received[index] >= entry.s) this.closeFile(index)
   }
 
-  /** Hand everything buffered so far to the sink as a single write. */
+  /** Open (once) the sink for a file, creating it on first sight. */
+  private sinkFor(index: number): Promise<FileSink | null> {
+    let pending = this.opening.get(index)
+    if (!pending) {
+      const entry = this.manifest[index]
+      pending = (async () => {
+        if (!this.target || !entry) return null
+        const sink = await this.target.create(entry.n, entry.s)
+        this.sinks.set(index, sink)
+        return sink
+      })()
+      this.opening.set(index, pending)
+    }
+    return pending
+  }
+
+  /** Write everything buffered so far, each piece at its own position. */
   private flushPending(): void {
     if (this.pendingBytes === 0) return
     const batch = this.pending
-    const total = this.pendingBytes
     this.pending = []
     this.pendingBytes = 0
     this.enqueue(async () => {
       if (this.aborted) return
-      const merged = new Uint8Array(total)
-      let at = 0
+      // group by file so each sink is resolved once per flush
+      const byFile = new Map<number, typeof batch>()
       for (const part of batch) {
-        merged.set(new Uint8Array(part), at)
-        at += part.byteLength
+        const list = byFile.get(part.index)
+        if (list) list.push(part)
+        else byFile.set(part.index, [part])
       }
-      await this.sink?.write(merged.buffer)
+      for (const [index, parts] of byFile) {
+        const sink = await this.sinkFor(index)
+        if (!sink) continue
+        // merge runs that happen to be contiguous, so the common in-order case
+        // still costs one write per megabyte rather than one per chunk
+        parts.sort((a, b) => a.offset - b.offset)
+        let run: { offset: number; parts: ArrayBuffer[]; bytes: number } | null = null
+        const flushRun = async () => {
+          if (!run) return
+          const merged = new Uint8Array(run.bytes)
+          let at = 0
+          for (const p of run.parts) {
+            merged.set(new Uint8Array(p), at)
+            at += p.byteLength
+          }
+          await sink.write(merged.buffer, run.offset)
+          run = null
+        }
+        for (const p of parts) {
+          if (run && run.offset + run.bytes === p.offset) {
+            run.parts.push(p.body)
+            run.bytes += p.body.byteLength
+          } else {
+            await flushRun()
+            run = { offset: p.offset, parts: [p.body], bytes: p.body.byteLength }
+          }
+        }
+        await flushRun()
+      }
+    })
+  }
+
+  /** A file has all its bytes — close it and see whether that was the last. */
+  private closeFile(index: number): void {
+    if (this.closed.has(index)) return
+    this.closed.add(index)
+    this.flushPending()
+    this.enqueue(async () => {
+      const sink = await this.sinkFor(index)
+      await sink?.close()
+      this.sinks.delete(index)
+      this.stats.filesDone++
+      this.emit(true)
+    })
+    this.checkAllReceived()
+  }
+
+  /**
+   * Settle only when every file's bytes are accounted for. The sender's 'done'
+   * can overtake chunks on an unordered channel, so it cannot itself be the
+   * signal that the transfer is complete.
+   */
+  private checkAllReceived(): void {
+    if (this.sawAllBytes || this.role !== 'receiver') return
+    if (!this.manifest.length) return
+    for (let i = 0; i < this.manifest.length; i++) {
+      if ((this.received[i] ?? 0) < this.manifest[i].s) return
+    }
+    this.sawAllBytes = true
+    this.flushPending()
+    this.enqueue(async () => {
+      await this.target?.finish()
+      // tell the sender before we settle: this is what lets it report "Sent"
+      // truthfully, and it must go out while the channel is still open
+      try {
+        this.channel?.send(JSON.stringify({ t: 'ack' }))
+      } catch {
+        /* channel already gone; the sender will time out and say so */
+      }
+      this.complete()
     })
   }
 
@@ -533,9 +648,9 @@ export class Transfer {
   private cleanupPartial(): void {
     this.pending = []
     this.pendingBytes = 0
-    const sink = this.sink
-    this.sink = null
-    void sink?.abort().catch(() => {})
+    for (const sink of this.sinks.values()) void sink.abort().catch(() => {})
+    this.sinks.clear()
+    this.opening.clear()
     this.target?.discard()
   }
 
