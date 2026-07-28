@@ -91,7 +91,7 @@ export function transferLabel(t: TransferProgress): string {
   if (t.state === 'error') return t.error ?? 'Failed'
   if (t.state === 'connecting') return 'Connecting…'
   const pct = t.bytesTotal > 0 ? Math.floor((t.bytesDone / t.bytesTotal) * 100) : 0
-  return t.relayed ? `Relaying ${pct}%` : `Sending ${pct}%`
+  return `Sending ${pct}%`
 }
 
 export function transferColor(t: TransferProgress): string {

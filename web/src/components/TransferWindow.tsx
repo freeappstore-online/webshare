@@ -105,16 +105,11 @@ export function TransferWindow({ transfer, onCancel, onDismiss }: TransferWindow
                 : transfer.currentName
                   ? `${filesDone + 1} of ${filesTotal} · ${transfer.currentName}`
                   : state === 'connecting'
-                    ? 'Setting up a direct connection…'
+                    ? 'Connecting directly…'
                     : ''}
             {speed && ` · ${speed}`}
           </p>
 
-          {transfer.relayed && running && (
-            <p className="mt-1 text-xs text-[var(--warning)]">
-              No direct route — relaying, this will be slower
-            </p>
-          )}
         </div>
 
         {running ? (

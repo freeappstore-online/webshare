@@ -1,13 +1,18 @@
 /**
  * File transfer, once a share request has been accepted.
  *
- * Bytes prefer a direct WebRTC data channel — on a LAN that's a straight
- * device-to-device link, so nothing touches a server. When no direct path can
- * be established (strict NAT, some corporate networks), the sender gives up
- * after `RTC_TIMEOUT_MS` and both sides fall back to relaying chunks through
- * the signaling worker, which is slower but always works.
+ * Bytes only ever travel over a direct WebRTC data channel between the two
+ * devices. There is deliberately no server-side relay and no STUN/TURN: on a
+ * shared network the peers reach each other with host (or mDNS) candidates
+ * alone, so nothing about the transfer — not the data, not even the IP
+ * discovery — involves a third party. The signaling worker trades the
+ * handshake and nothing else; it never sees a byte of a file.
  *
- * Wire (identical over both transports):
+ * The cost of that is honest: if no direct path exists (the two devices are on
+ * different networks, or the access point isolates its clients) the transfer
+ * fails and says so, rather than quietly routing the files through a server.
+ *
+ * Wire:
  *   sender → { t:'manifest', files:[{n,s}], bytes }   what's coming
  *   sender → { t:'file', i, n }  then binary chunks  then { t:'file-end', i }
  *   sender → { t:'done' }
@@ -30,24 +35,21 @@ const WRITE_BLOCK = 1024 * 1024
  * Ten updates a second is smooth to the eye and costs nothing.
  */
 const PROGRESS_INTERVAL_MS = 100
-/** Relay chunks are base64'd (×4/3) into a 64 KB worker message budget. */
-const RELAY_CHUNK = 32 * 1024
 /** Pause reading while this many bytes are still queued on the wire. */
 const HIGH_WATER = 4 * 1024 * 1024
 const LOW_WATER = 512 * 1024
-/** How long the sender keeps trying for a direct connection before relaying. */
-const RTC_TIMEOUT_MS = 8000
-/**
- * How long the receiver waits for the first byte before asking the sender to
- * relay. Longer than RTC_TIMEOUT_MS so the sender's own fallback goes first.
- */
-const RECV_TIMEOUT_MS = 13_000
-/** And how long after that before we admit the peer is simply unreachable. */
-const STALL_TIMEOUT_MS = 15_000
+/** How long to wait for the direct channel before calling it unreachable. */
+const CONNECT_TIMEOUT_MS = 15_000
 
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-]
+/**
+ * Empty on purpose. A STUN server's job is to discover your *public* address
+ * for NAT traversal, which is irrelevant between two devices on one network —
+ * and asking a third party for it would leak the user's IP on every transfer.
+ */
+const ICE_SERVERS: RTCIceServer[] = []
+
+const UNREACHABLE =
+  "Couldn't open a direct connection — both devices need to be on the same Wi-Fi."
 
 interface ManifestEntry {
   n: string
@@ -66,41 +68,11 @@ export interface TransferStats {
 export interface TransferHandlers {
   onSignal(msg: unknown): void
   onProgress(stats: TransferStats): void
-  onRelayed(): void
   onDone(): void
   onError(message: string): void
   /** Remote side aborted — distinct from an error so the UI can say so. */
   onRemoteCancel(): void
 }
-
-// --- transports -------------------------------------------------------------
-
-interface Wire {
-  send(data: string | ArrayBuffer): void
-  readonly buffered: number
-  /** Resolves once the wire has drained below LOW_WATER. */
-  drain(): Promise<void>
-  close(): void
-}
-
-function toBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf)
-  let s = ''
-  // chunked so a big buffer doesn't blow the argument limit of String.fromCharCode
-  for (let i = 0; i < bytes.length; i += 8192) {
-    s += String.fromCharCode(...bytes.subarray(i, i + 8192))
-  }
-  return btoa(s)
-}
-
-function fromBase64(s: string): ArrayBuffer {
-  const bin = atob(s)
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-  return bytes.buffer
-}
-
-// --- the transfer itself ----------------------------------------------------
 
 export class Transfer {
   readonly reqId: string
@@ -109,22 +81,10 @@ export class Transfer {
   private readonly handlers: TransferHandlers
   private readonly files: File[]
   private readonly target: SaveTarget | null
-  /** Relay transport: pushes an `xfer-data` payload through the worker. */
-  private readonly relaySend: (payload: { c?: unknown; b?: string }) => void
-  private readonly relayBuffered: () => number
 
   private pc: RTCPeerConnection | null = null
   private channel: RTCDataChannel | null = null
-  private wire: Wire | null = null
-  private relayed = false
-  private fallbackTimer: ReturnType<typeof setTimeout> | undefined
-  private recvTimer: ReturnType<typeof setTimeout> | undefined
-  /** Receiver: has anything at all arrived from the sender yet? */
-  private heardFromPeer = false
-  /** Lets a restart-over-relay past the "no transport swap mid-flight" guard. */
-  private forceRelay = false
-  /** Bumped on restart so an older pump loop stops instead of interleaving. */
-  private generation = 0
+  private connectTimer: ReturnType<typeof setTimeout> | undefined
   /** ICE candidates that arrived before the remote description was applied. */
   private pendingIce: RTCIceCandidateInit[] = []
   private finished = false
@@ -147,6 +107,7 @@ export class Transfer {
   /** Chunks held back so the disk sees one big write instead of hundreds. */
   private pending: ArrayBuffer[] = []
   private pendingBytes = 0
+  private lastEmit = 0
 
   private stats: TransferStats = {
     bytesDone: 0,
@@ -161,16 +122,12 @@ export class Transfer {
     role: 'sender' | 'receiver'
     files?: File[]
     target?: SaveTarget | null
-    relaySend: (payload: { c?: unknown; b?: string }) => void
-    relayBuffered: () => number
     handlers: TransferHandlers
   }) {
     this.reqId = opts.reqId
     this.role = opts.role
     this.files = opts.files ?? []
     this.target = opts.target ?? null
-    this.relaySend = opts.relaySend
-    this.relayBuffered = opts.relayBuffered
     this.handlers = opts.handlers
 
     if (this.role === 'sender') {
@@ -183,45 +140,14 @@ export class Transfer {
     return this.stats
   }
 
-  get isRelayed(): boolean {
-    return this.relayed
-  }
-
   // --- setup ---------------------------------------------------------------
 
   start(): void {
-    this.openRtc()
-    if (this.role === 'receiver') this.armReceiveWatchdog()
-  }
-
-  /**
-   * The receiver can't tell the difference between "still negotiating" and
-   * "this is never going to connect", and the sender's own fallback only
-   * covers *its* view of the channel — a half-open path leaves this side
-   * waiting forever. So: if nothing has arrived in time, ask the sender to
-   * relay, and if that produces nothing either, say so instead of spinning.
-   */
-  private armReceiveWatchdog(): void {
-    this.recvTimer = setTimeout(() => {
-      if (this.heardFromPeer || this.finished || this.aborted) return
-      if (!this.relayed) {
-        this.handlers.onSignal({ t: 'xfer-relay', reqId: this.reqId })
-        this.switchToRelay(false)
-      }
-      this.recvTimer = setTimeout(() => {
-        if (this.heardFromPeer || this.finished || this.aborted) return
-        this.fail("Couldn't reach the sender — ask them to try again")
-      }, STALL_TIMEOUT_MS)
-    }, RECV_TIMEOUT_MS)
-  }
-
-  private openRtc(): void {
     let pc: RTCPeerConnection
     try {
       pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
     } catch {
-      // no WebRTC at all (old browser, hardened config) — relay straight away
-      if (this.role === 'sender') this.switchToRelay(true)
+      this.fail('This browser can’t open a direct connection.')
       return
     }
     this.pc = pc
@@ -232,10 +158,8 @@ export class Transfer {
       }
     }
     pc.onconnectionstatechange = () => {
-      // 'failed' means ICE exhausted every path — don't wait out the timer
-      if (pc.connectionState === 'failed' && this.role === 'sender' && !this.relayed) {
-        this.switchToRelay(true)
-      }
+      // ICE exhausted every path — no point waiting out the timer
+      if (pc.connectionState === 'failed') this.fail(UNREACHABLE)
     }
 
     if (this.role === 'sender') {
@@ -248,145 +172,48 @@ export class Transfer {
           await pc.setLocalDescription(offer)
           this.handlers.onSignal({ t: 'rtc-offer', reqId: this.reqId, sdp: offer.sdp ?? '' })
         } catch {
-          this.switchToRelay(true)
+          this.fail(UNREACHABLE)
         }
       })()
-      // if nothing is flowing by now, a direct link isn't happening
-      this.fallbackTimer = setTimeout(() => {
-        if (!this.relayed && this.channel?.readyState !== 'open') this.switchToRelay(true)
-      }, RTC_TIMEOUT_MS)
     } else {
       pc.ondatachannel = (ev) => {
         ev.channel.binaryType = 'arraybuffer'
         this.bindChannel(ev.channel)
       }
     }
+
+    this.connectTimer = setTimeout(() => {
+      if (this.channel?.readyState !== 'open') this.fail(UNREACHABLE)
+    }, CONNECT_TIMEOUT_MS)
   }
 
   private bindChannel(channel: RTCDataChannel): void {
     this.channel = channel
     channel.bufferedAmountLowThreshold = LOW_WATER
+
     const onOpen = () => {
-      if (this.relayed) return
-      clearTimeout(this.fallbackTimer)
-      this.wire = {
-        send: (data) => {
-          if (typeof data === 'string') channel.send(data)
-          else channel.send(data)
-        },
-        get buffered() {
-          return channel.bufferedAmount
-        },
-        drain: () =>
-          new Promise<void>((resolve) => {
-            const onLow = () => {
-              channel.removeEventListener('bufferedamountlow', onLow)
-              resolve()
-            }
-            channel.addEventListener('bufferedamountlow', onLow)
-          }),
-        close: () => channel.close(),
-      }
-      this.onWireOpen()
+      clearTimeout(this.connectTimer)
+      if (this.role === 'sender') void this.pump()
     }
     // Chrome hands the receiver a channel that is *already* open, so a plain
-    // `onopen` handler would never fire and this side would sit there with no
-    // wire — check the state instead of trusting the event.
+    // `onopen` handler would never fire and this side would sit there idle.
     if (channel.readyState === 'open') onOpen()
     else channel.onopen = onOpen
+
     channel.onmessage = (ev) => {
-      if (this.relayed) return
       if (typeof ev.data === 'string') this.handleControl(JSON.parse(ev.data))
       else void this.handleChunk(ev.data as ArrayBuffer)
     }
     channel.onclose = () => {
       // a close before 'done' means the peer vanished mid-transfer
-      if (!this.finished && !this.aborted && !this.relayed && !this.sawDone) {
-        this.fail('Connection lost')
-      }
+      if (!this.finished && !this.aborted && !this.sawDone) this.fail('Connection lost')
     }
-  }
-
-  /** Have any payload bytes crossed the wire yet? */
-  private get inFlight(): boolean {
-    return this.stats.bytesDone > 0
-  }
-
-  /**
-   * Give up on WebRTC; `announce` tells the peer to switch too.
-   *
-   * Only valid before any bytes have moved. Swapping transports mid-file would
-   * silently drop whatever was still buffered in the dead data channel and the
-   * receiver would write a corrupt file, so once we're streaming, a broken
-   * connection is a failure — not something to paper over.
-   */
-  private switchToRelay(announce: boolean): void {
-    if (this.relayed || this.finished || this.aborted) return
-    if (this.inFlight && !this.forceRelay) {
-      this.fail('Connection lost')
-      return
-    }
-    this.forceRelay = false
-    this.relayed = true
-    clearTimeout(this.fallbackTimer)
-    this.channel?.close()
-    this.channel = null
-    this.pc?.close()
-    this.pc = null
-    if (announce) this.handlers.onSignal({ t: 'xfer-relay', reqId: this.reqId })
-
-    const relayBuffered = this.relayBuffered
-    this.wire = {
-      send: (data) => {
-        if (typeof data === 'string') this.relaySend({ c: JSON.parse(data) })
-        else this.relaySend({ b: toBase64(data) })
-      },
-      get buffered() {
-        return relayBuffered()
-      },
-      // the WebSocket has no drain event — poll until it works the backlog off
-      drain: () =>
-        new Promise<void>((resolve) => {
-          const tick = () => (relayBuffered() <= LOW_WATER ? resolve() : setTimeout(tick, 50))
-          tick()
-        }),
-      close: () => {},
-    }
-
-    this.handlers.onRelayed()
-    this.onWireOpen()
-  }
-
-  /**
-   * Peer told us it fell back to the relay.
-   *
-   * A receiver only sends this when it has received *nothing*, so if we'd
-   * already started pushing bytes into a channel it never heard from, the safe
-   * move is to rewind and send the whole thing again over the relay — not to
-   * refuse (as a mid-flight transport swap normally must).
-   */
-  acceptRelay(): void {
-    if (this.relayed || this.finished || this.aborted) return
-    if (this.role === 'sender' && this.inFlight) {
-      this.generation++
-      this.stats.bytesDone = 0
-      this.stats.filesDone = 0
-      this.stats.currentName = null
-      this.emit()
-    }
-    this.relayed = false
-    this.forceRelay = true
-    this.switchToRelay(false)
-  }
-
-  private onWireOpen(): void {
-    if (this.role === 'sender') void this.pump()
   }
 
   // --- signaling from the peer ---------------------------------------------
 
   async handleOffer(sdp: string): Promise<void> {
-    if (!this.pc || this.relayed) return
+    if (!this.pc) return
     try {
       await this.pc.setRemoteDescription({ type: 'offer', sdp })
       await this.flushIce()
@@ -394,22 +221,22 @@ export class Transfer {
       await this.pc.setLocalDescription(answer)
       this.handlers.onSignal({ t: 'rtc-answer', reqId: this.reqId, sdp: answer.sdp ?? '' })
     } catch {
-      // the sender's timeout will move us both to the relay
+      this.fail(UNREACHABLE)
     }
   }
 
   async handleAnswer(sdp: string): Promise<void> {
-    if (!this.pc || this.relayed) return
+    if (!this.pc) return
     try {
       await this.pc.setRemoteDescription({ type: 'answer', sdp })
       await this.flushIce()
     } catch {
-      /* same — fall back on timeout */
+      this.fail(UNREACHABLE)
     }
   }
 
   async handleIce(candidate: RTCIceCandidateInit): Promise<void> {
-    if (!this.pc || this.relayed) return
+    if (!this.pc) return
     if (!this.pc.remoteDescription) {
       this.pendingIce.push(candidate)
       return
@@ -423,30 +250,33 @@ export class Transfer {
     for (const c of queued) await this.pc?.addIceCandidate(c).catch(() => {})
   }
 
-  /** A relayed `xfer-data` payload arrived through the worker. */
-  handleRelayData(payload: { c?: unknown; b?: string }): void {
-    // data over the relay means the peer already switched; follow it even if
-    // we'd otherwise refuse (we've received nothing, so there's nothing to lose)
-    if (!this.relayed) {
-      this.forceRelay = true
-      this.switchToRelay(false)
-    }
-    if (payload.c !== undefined) this.handleControl(payload.c)
-    else if (typeof payload.b === 'string') void this.handleChunk(fromBase64(payload.b))
-  }
-
   // --- sending -------------------------------------------------------------
 
+  private chunkSize(): number {
+    // browsers report what SCTP negotiated (Chrome: 256 KB); 16 KB is only the
+    // universally-safe floor, and using it needlessly quadruples message count
+    const max = this.pc?.sctp?.maxMessageSize ?? 0
+    return max > RTC_CHUNK ? Math.min(max, MAX_RTC_CHUNK) : RTC_CHUNK
+  }
+
+  /** Resolves once the channel has worked its backlog off. */
+  private drain(channel: RTCDataChannel): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const onLow = () => {
+        channel.removeEventListener('bufferedamountlow', onLow)
+        resolve()
+      }
+      channel.addEventListener('bufferedamountlow', onLow)
+    })
+  }
+
   private async pump(): Promise<void> {
-    const wire = this.wire
-    if (!wire) return
-    // a restart bumps the generation; the superseded loop bails out rather
-    // than interleaving its chunks with the new one's
-    const gen = this.generation
-    const stale = () => this.aborted || gen !== this.generation
+    const channel = this.channel
+    if (!channel) return
+    const stale = () => this.aborted || this.finished
     const files = this.files
     try {
-      wire.send(
+      channel.send(
         JSON.stringify({
           t: 'manifest',
           files: files.map((f) => ({ n: f.name, s: f.size })),
@@ -459,10 +289,8 @@ export class Transfer {
         const file = files[i]
         this.stats.currentName = file.name
         this.emit(true)
-        wire.send(JSON.stringify({ t: 'file', i, n: file.name }))
+        channel.send(JSON.stringify({ t: 'file', i, n: file.name }))
 
-        // fixed for the whole file — the transport can't change once we're
-        // streaming (a restart replaces this loop outright), so it's stable
         const chunk = this.chunkSize()
         // read in big blocks, send in wire-sized pieces — a disk round trip per
         // 16 KB costs far more than the copy out of an already-loaded block
@@ -471,34 +299,26 @@ export class Transfer {
           const block = await file.slice(off, off + READ_BLOCK).arrayBuffer()
           for (let p = 0; p < block.byteLength; p += chunk) {
             if (stale()) return
-            if (wire.buffered > HIGH_WATER) await wire.drain()
+            if (channel.bufferedAmount > HIGH_WATER) await this.drain(channel)
             if (stale()) return
             const end = Math.min(p + chunk, block.byteLength)
-            wire.send(block.slice(p, end))
+            channel.send(block.slice(p, end))
             this.stats.bytesDone += end - p
             this.emit()
           }
         }
 
-        wire.send(JSON.stringify({ t: 'file-end', i }))
+        channel.send(JSON.stringify({ t: 'file-end', i }))
         this.stats.filesDone++
         this.emit(true)
       }
 
       if (stale()) return
-      wire.send(JSON.stringify({ t: 'done' }))
+      channel.send(JSON.stringify({ t: 'done' }))
       this.complete()
     } catch (err) {
       if (!stale()) this.fail(err instanceof Error ? err.message : 'Transfer failed')
     }
-  }
-
-  private chunkSize(): number {
-    if (this.relayed) return RELAY_CHUNK
-    // browsers report what SCTP negotiated (Chrome: 256 KB); 16 KB is only the
-    // universally-safe floor, and using it needlessly quadruples message count
-    const max = this.pc?.sctp?.maxMessageSize ?? 0
-    return max > RTC_CHUNK ? Math.min(max, MAX_RTC_CHUNK) : RTC_CHUNK
   }
 
   // --- receiving -----------------------------------------------------------
@@ -507,14 +327,12 @@ export class Transfer {
     // messages already in flight when we cancelled must not restart anything —
     // a late 'done' would otherwise hand the user their half-received files
     if (this.aborted || this.finished) return
-    this.heardFromPeer = true
-    clearTimeout(this.recvTimer)
     const msg = raw as { t?: string; files?: ManifestEntry[]; bytes?: number; n?: string }
     if (msg?.t === 'manifest') {
       this.manifest = Array.isArray(msg.files) ? msg.files : []
       this.stats.filesTotal = this.manifest.length
       this.stats.bytesTotal = Number(msg.bytes) || this.manifest.reduce((n, f) => n + f.s, 0)
-      this.emit()
+      this.emit(true)
     } else if (msg?.t === 'file') {
       const name = typeof msg.n === 'string' ? msg.n : 'file'
       this.stats.currentName = name
@@ -580,8 +398,6 @@ export class Transfer {
 
   // --- teardown ------------------------------------------------------------
 
-  private lastEmit = 0
-
   /** `force` for state changes and the final update, which must never be lost. */
   private emit(force = false): void {
     const now = Date.now()
@@ -593,7 +409,7 @@ export class Transfer {
   private complete(): void {
     if (this.finished || this.aborted) return
     this.finished = true
-    clearTimeout(this.fallbackTimer)
+    clearTimeout(this.connectTimer)
     this.stats.currentName = null
     this.emit(true)
     this.handlers.onDone()
@@ -606,7 +422,7 @@ export class Transfer {
     // final chunks, so hold it open until the wire drains (or we give up).
     const deadline = Date.now() + 15_000
     const waitDrain = () => {
-      if ((this.wire?.buffered ?? 0) > 0 && Date.now() < deadline) {
+      if ((this.channel?.bufferedAmount ?? 0) > 0 && Date.now() < deadline) {
         setTimeout(waitDrain, 100)
         return
       }
@@ -628,9 +444,9 @@ export class Transfer {
     if (this.finished || this.aborted) return
     this.aborted = true
     try {
-      this.wire?.send(JSON.stringify({ t: 'abort' }))
+      this.channel?.send(JSON.stringify({ t: 'abort' }))
     } catch {
-      /* wire already gone */
+      /* channel already gone */
     }
     this.handlers.onSignal({ t: 'xfer-abort', reqId: this.reqId })
     this.cleanupPartial()
@@ -640,12 +456,11 @@ export class Transfer {
   /**
    * Peer cancelled.
    *
-   * This can land *after* we've marked ourselves done: on a fast link the
-   * sender pushes its last byte long before the receiver has finished writing,
-   * so "done" on this side only ever meant "sent", not "received". A receiver
-   * only sends abort when it did not complete, so their cancel is the true
-   * outcome and has to override our optimistic finish — otherwise the sender
-   * cheerfully reports "Sent" for files that were thrown away.
+   * This can land *after* we've marked ourselves done: the sender pushes its
+   * last byte long before the receiver has finished writing, so "done" on the
+   * sending side only ever meant "sent", not "received". A receiver only sends
+   * abort when it did not complete, so their cancel is the true outcome and has
+   * to override our optimistic finish.
    */
   remoteAbort(): void {
     if (this.aborted) return
@@ -666,10 +481,7 @@ export class Transfer {
   }
 
   private teardown(): void {
-    clearTimeout(this.fallbackTimer)
-    clearTimeout(this.recvTimer)
-    this.wire?.close()
-    this.wire = null
+    clearTimeout(this.connectTimer)
     this.channel?.close()
     this.channel = null
     this.pc?.close()

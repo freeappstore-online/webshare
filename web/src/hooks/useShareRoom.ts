@@ -100,13 +100,9 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
         role: dir === 'send' ? 'sender' : 'receiver',
         files: opts.files,
         target: opts.target,
-        relaySend: (payload) =>
-          void clientFor(peer.id)?.sendTo(peer.id, { t: 'xfer-data', reqId, ...payload } as PeerMsg),
-        relayBuffered: () => clientFor(peer.id)?.bufferedAmount ?? 0,
         handlers: {
           onSignal: (msg) => void clientFor(peer.id)?.sendTo(peer.id, msg),
           onProgress: (stats) => patchTransfer(reqId, { ...stats, state: 'transferring' }),
-          onRelayed: () => patchTransfer(reqId, { relayed: true }),
           onDone: () =>
             patchTransfer(reqId, {
               state: 'done',
@@ -132,7 +128,6 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
           peerName: peer.name,
           peerPfp: peer.pfp,
           state: 'connecting',
-          relayed: false,
           savedTo: null,
           error: null,
           startedAt: Date.now(),
@@ -195,10 +190,6 @@ export function useShareRoom(profile: Profile, discoverable: boolean) {
       void transfersRef.current.get(m.reqId)?.transfer.handleAnswer(m.sdp)
     } else if (m?.t === 'rtc-ice' && m.candidate) {
       void transfersRef.current.get(m.reqId)?.transfer.handleIce(m.candidate)
-    } else if (m?.t === 'xfer-relay') {
-      transfersRef.current.get(m.reqId)?.transfer.acceptRelay()
-    } else if (m?.t === 'xfer-data') {
-      transfersRef.current.get(m.reqId)?.transfer.handleRelayData(m)
     } else if (m?.t === 'xfer-abort') {
       transfersRef.current.get(m.reqId)?.transfer.remoteAbort()
     } else if (m?.t === 'share-cancel') {

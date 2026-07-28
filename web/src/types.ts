@@ -47,14 +47,10 @@ export type PeerMsg =
   | { t: 'share-req'; reqId: string; total: number; files: FileMeta[]; name: string; device: DeviceKind; pfp: string | null }
   | { t: 'share-resp'; reqId: string; accept: boolean }
   | { t: 'share-cancel'; reqId: string }
-  // --- transfer setup (WebRTC handshake, relayed through the worker) ---
+  // --- transfer setup: only the handshake goes through the worker, never data ---
   | { t: 'rtc-offer'; reqId: string; sdp: string }
   | { t: 'rtc-answer'; reqId: string; sdp: string }
   | { t: 'rtc-ice'; reqId: string; candidate: RTCIceCandidateInit }
-  /** Sender gave up on a direct connection — finish over the worker relay. */
-  | { t: 'xfer-relay'; reqId: string }
-  /** Bytes travelling over the relay: `c` = control JSON, `b` = base64 chunk. */
-  | { t: 'xfer-data'; reqId: string; c?: unknown; b?: string }
   /** Either side aborted mid-transfer. */
   | { t: 'xfer-abort'; reqId: string }
 
@@ -70,8 +66,6 @@ export interface TransferProgress {
   peerName: string
   peerPfp: string | null
   state: TransferState
-  /** true once we fell back to relaying bytes through the signaling worker */
-  relayed: boolean
   bytesDone: number
   bytesTotal: number
   filesDone: number
