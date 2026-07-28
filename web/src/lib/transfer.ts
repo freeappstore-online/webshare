@@ -49,7 +49,8 @@ const CONNECT_TIMEOUT_MS = 15_000
 const ICE_SERVERS: RTCIceServer[] = []
 
 const UNREACHABLE =
-  "Couldn't open a direct connection — both devices need to be on the same Wi-Fi."
+  "Couldn't reach that device directly. You both need to be on the same network — " +
+  'Webshare never routes files through a server.'
 
 interface ManifestEntry {
   n: string

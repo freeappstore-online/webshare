@@ -189,7 +189,7 @@ export function SharePage({
                   className="w-40 rounded-[var(--radius-sm)] border border-[var(--line-strong)] bg-white p-2"
                 />
                 <p className="max-w-44 text-center text-xs text-[var(--muted)]">
-                  Not on your Wi-Fi? They can enter this code under “Receive files…”
+                  On the same Wi-Fi but not in the list? They can enter this code under “Receive files…”
                 </p>
               </div>
               {/* mobile: compact button, same style as the profile Edit button */}
@@ -281,7 +281,7 @@ export function SharePage({
                 title="No one's here yet"
                 message={
                   shareCode
-                    ? `Ask the other person to switch discoverable on (same Wi-Fi), or to enter code ${shareCode} under "Receive files…" — they'll show up here.`
+                    ? `Ask the other person to switch discoverable on. Big networks (campus, office) can hide people from each other — if they don't appear, have them enter code ${shareCode} under "Receive files…".`
                     : 'Ask the other person to open Webshare on the same Wi-Fi and switch discoverable on — they\'ll show up here. No sign-up needed.'
                 }
               />
@@ -325,7 +325,7 @@ export function SharePage({
         <div className="hidden min-[680px]:block" />
         <div className="mx-auto w-full max-w-2xl">
           <p className="relative z-10 mb-0.5 text-center text-xs text-[var(--muted)]">
-            Not here? Check if they are on your Wi-Fi and discoverable
+            Not here? Check they're on this Wi-Fi and discoverable — or send them your share code
           </p>
           <div className="relative">
             <div className="pointer-events-none absolute bottom-full left-0 right-0 h-4" style={{ background: 'linear-gradient(to bottom, transparent, var(--bg-end))' }} />
