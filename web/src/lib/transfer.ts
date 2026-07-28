@@ -50,14 +50,19 @@ const HEADER = 12
 /**
  * How many parallel peer connections carry the file.
  *
- * Throughput over one connection is its congestion window divided by the
- * round-trip time, and on a lossy link that window collapses on every loss and
- * never recovers — measured at 87 KB against a 169 ms RTT, which is exactly the
- * 0.5 MB/s observed. Neither term is under the app's control, but the window is
- * per-connection, so several of them add up. Set to 1 to go back to a single
- * connection.
+ * Two, not more, and measured rather than guessed. The theory for going wide
+ * was that throughput is the congestion window over the round-trip time, so
+ * several windows would add up. Two runs over the same link disagree: the
+ * window doubled (87 KB at 169 ms, then 204 KB at 433 ms) while throughput
+ * stayed at roughly 0.5 MB/s. A window that grows without moving throughput
+ * means the medium is rate-capped, and no number of windows raises a rate cap.
+ *
+ * Four links also made the link measurably worse — median round-trip 169 ms to
+ * 433 ms, worst case 0.6 s to 6.4 s — which is what contention for airtime on
+ * one half-duplex radio looks like. Two keeps the one thing parallelism does
+ * buy, that a link stalling doesn't halt everything, at half the contention.
  */
-const LINKS = 4
+const LINKS = 2
 /** How long to wait for the direct channel before calling it unreachable. */
 const CONNECT_TIMEOUT_MS = 15_000
 /** After the first link is up, how long to let the rest join before starting. */
@@ -282,7 +287,7 @@ export class Transfer {
         this.diag.mark('channel-open')
         this.diag.noteChunk(this.chunkSize(), link.pc.sctp?.maxMessageSize ?? 0)
         this.diag.startSampling(
-          link.pc,
+          () => this.links.filter((l) => l?.channel?.readyState === 'open').map((l) => l.pc),
           () => this.stats.bytesDone,
           // sender: what's queued across every link; receiver: unwritten bytes
           () =>
@@ -321,7 +326,6 @@ export class Transfer {
     if (this.pumping || this.aborted || this.finished) return
     this.pumping = true
     clearTimeout(this.gatherTimer)
-    this.diag.noteLinks(this.openChannels().length)
     void this.pump()
   }
 

@@ -85,12 +85,7 @@ export class TransferDiag {
     this.readMs += ms
   }
 
-  private linkCount = 1
-
-  /** How many parallel connections ended up carrying the file. */
-  noteLinks(n: number): void {
-    this.linkCount = n
-  }
+  private linkCount = 0
 
   noteChunk(chunk: number, maxMessage: number): void {
     this.chunk = chunk
@@ -99,7 +94,7 @@ export class TransferDiag {
 
   /** Poll the connection while data flows. Safe to call more than once. */
   startSampling(
-    pc: RTCPeerConnection | null,
+    peers: () => RTCPeerConnection[],
     bytesSoFar: () => number,
     backlog: () => number
   ): void {
@@ -111,11 +106,23 @@ export class TransferDiag {
         backlog: backlog(),
       }
       this.samples.push(sample)
-      // getStats is async; fill the numbers in on the sample we just pushed
-      void pc?.getStats().then((stats) => {
-        stats.forEach((r: any) => {
+      // Every link has its own stats. Reading only the first made the wire
+      // total a fraction of the payload — a ratio below 1.0, which is
+      // impossible and was the clue that the links were in fact all working.
+      const links = peers()
+      this.linkCount = Math.max(this.linkCount, links.length)
+      let wire = 0
+      let rttSum = 0
+      let rttCount = 0
+      void Promise.all(links.map((pc) => pc.getStats().catch(() => null))).then((all) => {
+        for (const stats of all) {
+          if (!stats) continue
+          stats.forEach((r: any) => {
           if (r.type === 'candidate-pair' && (r.nominated || r.state === 'succeeded')) {
-            if (typeof r.currentRoundTripTime === 'number') sample.rttMs = r.currentRoundTripTime * 1000
+            if (typeof r.currentRoundTripTime === 'number') {
+              rttSum += r.currentRoundTripTime * 1000
+              rttCount++
+            }
             const local = stats.get(r.localCandidateId) as any
             const remote = stats.get(r.remoteCandidateId) as any
             if (local) {
@@ -132,10 +139,13 @@ export class TransferDiag {
           // transport totals include retransmissions, so comparing them with
           // the payload shows how much the link is making us re-send
           if (r.type === 'transport') {
-            const n = this.role === 'sender' ? r.bytesSent : r.bytesReceived
-            if (typeof n === 'number') sample.wireBytes = n
-          }
-        })
+              const n = this.role === 'sender' ? r.bytesSent : r.bytesReceived
+              if (typeof n === 'number') wire += n
+            }
+          })
+        }
+        if (rttCount) sample.rttMs = rttSum / rttCount
+        if (wire > 0) sample.wireBytes = wire
       }).catch(() => {})
     }
     // take one immediately, so the wire-vs-payload baseline spans the whole run
