@@ -16,8 +16,20 @@
 
 import type { SaveTarget, FileSink } from './saveTarget'
 
-/** RTCDataChannel implementations cap a single message at 16 KiB in practice. */
+/** Safe floor for a single data-channel message across implementations. */
 const RTC_CHUNK = 16 * 1024
+/** Ceiling once SCTP tells us it can take more — fewer, bigger messages. */
+const MAX_RTC_CHUNK = 64 * 1024
+/** Pull this much off disk at a time, then hand it out in wire-sized pieces. */
+const READ_BLOCK = 4 * 1024 * 1024
+/** Coalesce received chunks to about this much before touching the disk. */
+const WRITE_BLOCK = 1024 * 1024
+/**
+ * Progress goes into React state, so emitting per chunk means a full re-render
+ * per chunk — which throttles the transfer far below the network's capacity.
+ * Ten updates a second is smooth to the eye and costs nothing.
+ */
+const PROGRESS_INTERVAL_MS = 100
 /** Relay chunks are base64'd (×4/3) into a 64 KB worker message budget. */
 const RELAY_CHUNK = 32 * 1024
 /** Pause reading while this many bytes are still queued on the wire. */
@@ -132,6 +144,9 @@ export class Transfer {
    * disk drains — chain every write onto a single promise queue.
    */
   private queue: Promise<void> = Promise.resolve()
+  /** Chunks held back so the disk sees one big write instead of hundreds. */
+  private pending: ArrayBuffer[] = []
+  private pendingBytes = 0
 
   private stats: TransferStats = {
     bytesDone: 0,
@@ -443,26 +458,31 @@ export class Transfer {
         if (stale()) return
         const file = files[i]
         this.stats.currentName = file.name
-        this.emit()
+        this.emit(true)
         wire.send(JSON.stringify({ t: 'file', i, n: file.name }))
 
         // fixed for the whole file — the transport can't change once we're
         // streaming (a restart replaces this loop outright), so it's stable
         const chunk = this.chunkSize()
-        for (let off = 0; off < file.size; off += chunk) {
+        // read in big blocks, send in wire-sized pieces — a disk round trip per
+        // 16 KB costs far more than the copy out of an already-loaded block
+        for (let off = 0; off < file.size; off += READ_BLOCK) {
           if (stale()) return
-          if (wire.buffered > HIGH_WATER) await wire.drain()
-          if (stale()) return
-          const buf = await file.slice(off, off + chunk).arrayBuffer()
-          if (stale()) return
-          wire.send(buf)
-          this.stats.bytesDone += buf.byteLength
-          this.emit()
+          const block = await file.slice(off, off + READ_BLOCK).arrayBuffer()
+          for (let p = 0; p < block.byteLength; p += chunk) {
+            if (stale()) return
+            if (wire.buffered > HIGH_WATER) await wire.drain()
+            if (stale()) return
+            const end = Math.min(p + chunk, block.byteLength)
+            wire.send(block.slice(p, end))
+            this.stats.bytesDone += end - p
+            this.emit()
+          }
         }
 
         wire.send(JSON.stringify({ t: 'file-end', i }))
         this.stats.filesDone++
-        this.emit()
+        this.emit(true)
       }
 
       if (stale()) return
@@ -474,7 +494,11 @@ export class Transfer {
   }
 
   private chunkSize(): number {
-    return this.relayed ? RELAY_CHUNK : RTC_CHUNK
+    if (this.relayed) return RELAY_CHUNK
+    // browsers report what SCTP negotiated (Chrome: 256 KB); 16 KB is only the
+    // universally-safe floor, and using it needlessly quadruples message count
+    const max = this.pc?.sctp?.maxMessageSize ?? 0
+    return max > RTC_CHUNK ? Math.min(max, MAX_RTC_CHUNK) : RTC_CHUNK
   }
 
   // --- receiving -----------------------------------------------------------
@@ -494,20 +518,22 @@ export class Transfer {
     } else if (msg?.t === 'file') {
       const name = typeof msg.n === 'string' ? msg.n : 'file'
       this.stats.currentName = name
-      this.emit()
+      this.emit(true)
       // serialize opening against the chunk queue below
       this.enqueue(async () => {
         this.sink = this.target ? await this.target.create(name) : null
       })
     } else if (msg?.t === 'file-end') {
+      this.flushPending()
       this.enqueue(async () => {
         await this.sink?.close()
         this.sink = null
         this.stats.filesDone++
-        this.emit()
+        this.emit(true)
       })
     } else if (msg?.t === 'done') {
       this.sawDone = true
+      this.flushPending()
       this.enqueue(async () => {
         await this.target?.finish()
         this.complete()
@@ -519,11 +545,30 @@ export class Transfer {
 
   private async handleChunk(buf: ArrayBuffer): Promise<void> {
     if (this.aborted || this.finished) return
+    // count on arrival: progress should track the transfer, not the disk
+    this.stats.bytesDone += buf.byteLength
+    this.emit()
+    this.pending.push(buf)
+    this.pendingBytes += buf.byteLength
+    if (this.pendingBytes >= WRITE_BLOCK) this.flushPending()
+  }
+
+  /** Hand everything buffered so far to the sink as a single write. */
+  private flushPending(): void {
+    if (this.pendingBytes === 0) return
+    const batch = this.pending
+    const total = this.pendingBytes
+    this.pending = []
+    this.pendingBytes = 0
     this.enqueue(async () => {
       if (this.aborted) return
-      await this.sink?.write(buf)
-      this.stats.bytesDone += buf.byteLength
-      this.emit()
+      const merged = new Uint8Array(total)
+      let at = 0
+      for (const part of batch) {
+        merged.set(new Uint8Array(part), at)
+        at += part.byteLength
+      }
+      await this.sink?.write(merged.buffer)
     })
   }
 
@@ -535,7 +580,13 @@ export class Transfer {
 
   // --- teardown ------------------------------------------------------------
 
-  private emit(): void {
+  private lastEmit = 0
+
+  /** `force` for state changes and the final update, which must never be lost. */
+  private emit(force = false): void {
+    const now = Date.now()
+    if (!force && now - this.lastEmit < PROGRESS_INTERVAL_MS) return
+    this.lastEmit = now
     this.handlers.onProgress({ ...this.stats })
   }
 
@@ -544,7 +595,7 @@ export class Transfer {
     this.finished = true
     clearTimeout(this.fallbackTimer)
     this.stats.currentName = null
-    this.emit()
+    this.emit(true)
     this.handlers.onDone()
 
     if (this.role !== 'sender') {
@@ -606,6 +657,8 @@ export class Transfer {
   }
 
   private cleanupPartial(): void {
+    this.pending = []
+    this.pendingBytes = 0
     const sink = this.sink
     this.sink = null
     void sink?.abort().catch(() => {})
