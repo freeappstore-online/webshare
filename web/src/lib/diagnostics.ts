@@ -98,7 +98,14 @@ export class ConnectLog {
   private mdnsLocal = false
   private mdnsRemote = false
 
+  /** True once ICE reported it had exhausted every path. */
+  iceFailed = false
+  /** True once ICE got as far as testing candidate pairs. */
+  iceChecked = false
+
   note(text: string): void {
+    if (text.includes('ice failed')) this.iceFailed = true
+    if (text.includes('ice checking')) this.iceChecked = true
     if (this.events.length < 80) {
       this.events.push(`${((performance.now() - this.t0) / 1000).toFixed(1)}s ${text}`)
     }
@@ -150,7 +157,22 @@ export class ConnectLog {
     lines.push('')
 
     // say what it most likely means, since the raw fields don't
-    if (this.localTypes.size && !this.remoteTypes.size) {
+    // ICE's own verdict beats counting pairs: browsers drop the pair list once
+    // the connection fails, so an empty list after a failure says nothing.
+    if (this.iceFailed && this.iceChecked) {
+      lines.push('ICE tested every address both sides offered and none of them')
+      lines.push('worked. it got as far as checking and then reported failure,')
+      lines.push('so this is not a timeout and not a missing address — the')
+      lines.push('network is carrying our signalling but refusing to carry')
+      lines.push('traffic directly between two of its own clients.')
+      lines.push('')
+      lines.push('that is "client isolation" and public, guest and campus Wi-Fi')
+      lines.push('very often enforce it. no change here can defeat it: the')
+      lines.push('packets are being dropped by the network, not by the app.')
+      lines.push('')
+      lines.push('what does work is a network that permits it — a personal')
+      lines.push('hotspot from one of the two devices, or any home Wi-Fi.')
+    } else if (this.localTypes.size && !this.remoteTypes.size) {
       lines.push('the other device never sent any candidates — it may not have')
       lines.push('got our request, or its own gathering failed.')
     } else if (pairs === 0 && this.mdnsRemote && !this.mdnsLocal) {
