@@ -83,6 +83,15 @@ const HEADER = 12
 const LINKS = 2
 /** How long to wait for the direct channel before calling it unreachable. */
 const CONNECT_TIMEOUT_MS = 15_000
+/**
+ * Hard limit on connecting. The shorter timeout above only applies while ICE
+ * has nothing to show for itself — if it is still working through candidate
+ * pairs we keep waiting, because on a busy public network, with mDNS lookups in
+ * the way, checking legitimately takes longer than fifteen seconds. Giving up
+ * mid-check was reported as the network refusing traffic, when in fact the
+ * connection had simply not been given time.
+ */
+const CONNECT_HARD_LIMIT_MS = 60_000
 /** After the first link is up, how long to let the rest join before starting. */
 const LINK_GATHER_MS = 2500
 /**
@@ -233,9 +242,26 @@ export class Transfer {
       for (let i = 0; i < LINKS; i++) this.openLink(i)
     }
     // the receiver builds its side as offers arrive, one per link
-    this.connectTimer = setTimeout(() => {
-      if (!this.openChannels().length) this.fail(UNREACHABLE)
-    }, CONNECT_TIMEOUT_MS)
+    const startedAt = performance.now()
+    const check = () => {
+      if (this.openChannels().length || this.aborted || this.finished) return
+      const waited = performance.now() - startedAt
+      // still negotiating? give it longer, up to the hard limit
+      const busy = this.links.some(
+        (l) =>
+          l &&
+          (l.pc.iceConnectionState === 'checking' ||
+            l.pc.iceConnectionState === 'new' ||
+            l.pc.connectionState === 'connecting')
+      )
+      if (busy && waited < CONNECT_HARD_LIMIT_MS) {
+        this.clog.note(`still checking after ${(waited / 1000).toFixed(0)}s — waiting`)
+        this.connectTimer = setTimeout(check, 5000)
+        return
+      }
+      this.fail(UNREACHABLE)
+    }
+    this.connectTimer = setTimeout(check, CONNECT_TIMEOUT_MS)
   }
 
   /** Create (or fetch) the connection for one link. */

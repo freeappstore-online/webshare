@@ -129,6 +129,7 @@ export class ConnectLog {
 
     let pairs = 0
     let succeeded = 0
+    let inProgress = 0
     const states = new Set<string>()
     for (const pc of peers) {
       const stats = await pc.getStats().catch(() => null)
@@ -137,10 +138,14 @@ export class ConnectLog {
           pairs++
           states.add(r.state)
           if (r.state === 'succeeded') succeeded++
+          if (r.state === 'in-progress' || r.state === 'waiting') inProgress++
         }
       })
     }
-    lines.push(`candidate pairs   ${pairs} tried, ${succeeded} succeeded`)
+    lines.push(
+      `candidate pairs   ${pairs} tried, ${succeeded} succeeded` +
+        (inProgress ? `, ${inProgress} still checking` : '')
+    )
     if (states.size) lines.push(`pair states       ${[...states].join(', ')}`)
     lines.push('')
 
@@ -164,6 +169,11 @@ export class ConnectLog {
       lines.push('candidates above, they never reached the connection — check')
       lines.push('the events below for a rejected candidate or a handshake')
       lines.push('that stopped partway.')
+    } else if (pairs > 0 && succeeded === 0 && inProgress > 0) {
+      lines.push(`${inProgress} of ${pairs} pairs were still being checked when`)
+      lines.push('this gave up — they had not failed. the connection was still')
+      lines.push('being negotiated and simply ran out of time, which on a busy')
+      lines.push('network with mDNS lookups in the way can take a while.')
     } else if (pairs > 0 && succeeded === 0) {
       lines.push('both sides offered addresses and every pair failed. that is')
       lines.push('the network refusing to carry traffic between two of its own')
