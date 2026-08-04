@@ -20,7 +20,7 @@
  */
 
 import { crc32 } from './crc32'
-import { DIAGNOSTICS, TransferDiag, storeReport } from './diagnostics'
+import { ConnectLog, DIAGNOSTICS, TransferDiag, storeReport } from './diagnostics'
 import type { SaveTarget, FileSink } from './saveTarget'
 
 /** Safe floor for a single data-channel message across implementations. */
@@ -188,6 +188,7 @@ export class Transfer {
   private earlyBytes = 0
   private lastEmit = 0
   private readonly diag: TransferDiag
+  private readonly clog = new ConnectLog()
   private sawFirstByte = false
 
   private stats: TransferStats = {
@@ -251,6 +252,7 @@ export class Transfer {
 
     pc.onicecandidate = (ev) => {
       if (ev.candidate) {
+        this.clog.candidate('local', ev.candidate.toJSON())
         this.handlers.onSignal({
           t: 'rtc-ice',
           reqId: this.reqId,
@@ -259,7 +261,11 @@ export class Transfer {
         })
       }
     }
+    pc.oniceconnectionstatechange = () => {
+      this.clog.note(`link ${index} ice ${pc.iceConnectionState}`)
+    }
     pc.onconnectionstatechange = () => {
+      this.clog.note(`link ${index} ${pc.connectionState}`)
       // one link failing is survivable; losing every one is not
       if (pc.connectionState === 'failed' && !this.openChannels().length && !this.pumping) {
         this.fail(UNREACHABLE)
@@ -305,6 +311,7 @@ export class Transfer {
 
     const onOpen = () => {
       clearTimeout(this.connectTimer)
+      this.clog.note(`link ${link.index} data channel open`)
       if (this.links.filter((l) => l?.channel?.readyState === 'open').length === 1) {
         this.diag.mark('channel-open')
         this.diag.noteChunk(this.chunkSize(), link.pc.sctp?.maxMessageSize ?? 0)
@@ -400,6 +407,7 @@ export class Transfer {
   }
 
   async handleIce(index: number, candidate: RTCIceCandidateInit): Promise<void> {
+    this.clog.candidate('remote', candidate)
     const link = this.links[index]
     if (!link) return
     if (!link.pc.remoteDescription) {
@@ -810,6 +818,17 @@ export class Transfer {
   private fail(message: string): void {
     if (this.finished || this.aborted) return
     this.aborted = true
+    // A connection that never opened is the one failure people need detail on,
+    // and there is no transfer running to slow down — so this report is not
+    // behind the diagnostics flag.
+    if (!this.sawFirstByte) {
+      const peers = this.links.filter(Boolean).map((l) => l.pc)
+      void this.clog.report(peers).then((text) => {
+        storeReport(text)
+        console.info(`[webshare]\n${text}`)
+        this.handlers.onReport?.(text)
+      })
+    }
     this.publishReport(`failed: ${message}`)
     this.cleanupPartial()
     this.teardown()

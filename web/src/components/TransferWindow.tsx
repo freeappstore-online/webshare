@@ -192,7 +192,7 @@ export function TransferWindow({ transfer, onCancel, onDismiss }: TransferWindow
                 }}
                 className="cursor-pointer text-xs font-semibold text-[var(--muted)] underline"
               >
-                {copied ? 'Copied ✓' : 'Copy speed report'}
+                {copied ? 'Copied ✓' : failed ? 'Copy connection report' : 'Copy speed report'}
               </button>
               <button
                 onClick={() => setShowReport((v) => !v)}

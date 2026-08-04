@@ -68,13 +68,100 @@ export function storeReport(text: string): void {
 }
 
 export function loadReport(): string | null {
-  // a report left over from a debugging session must not resurface for a
-  // normal user after the flag is switched back off
-  if (!DIAGNOSTICS) return null
+  // connection failures always store one, so it has to be readable with the
+  // flag off; only the verbose transfer report is gated
+  if (!DIAGNOSTICS) {
+    try {
+      const r = localStorage.getItem(LAST_REPORT_KEY)
+      return r?.startsWith('connection report') ? r : null
+    } catch {
+      return null
+    }
+  }
   try {
     return localStorage.getItem(LAST_REPORT_KEY)
   } catch {
     return null
+  }
+}
+
+/**
+ * What happened while trying to connect, kept whether or not diagnostics are
+ * switched on. A failure to connect is precisely the moment someone needs this,
+ * and there is no transfer running to slow down.
+ */
+export class ConnectLog {
+  private readonly t0 = performance.now()
+  private readonly events: string[] = []
+  private readonly localTypes = new Set<string>()
+  private readonly remoteTypes = new Set<string>()
+  private mdnsLocal = false
+  private mdnsRemote = false
+
+  note(text: string): void {
+    if (this.events.length < 80) {
+      this.events.push(`${((performance.now() - this.t0) / 1000).toFixed(1)}s ${text}`)
+    }
+  }
+
+  candidate(side: 'local' | 'remote', c: RTCIceCandidateInit): void {
+    // "candidate:... typ host ..." — the type is what says whether a usable
+    // path was even found, and a .local address is an mDNS name the other side
+    // has to resolve, which many public networks refuse to carry
+    const text = c.candidate ?? ''
+    const type = /typ (\w+)/.exec(text)?.[1] ?? 'unknown'
+    const isMdns = /\.local/.test(text)
+    if (side === 'local') {
+      this.localTypes.add(type)
+      if (isMdns) this.mdnsLocal = true
+    } else {
+      this.remoteTypes.add(type)
+      if (isMdns) this.mdnsRemote = true
+    }
+  }
+
+  /** Everything known about why a connection did or didn't come up. */
+  async report(peers: RTCPeerConnection[]): Promise<string> {
+    const lines: string[] = ['connection report', '']
+    const list = (s: Set<string>) => (s.size ? [...s].join(', ') : 'none')
+    lines.push(`our candidates    ${list(this.localTypes)}${this.mdnsLocal ? ' (mDNS .local)' : ''}`)
+    lines.push(`their candidates  ${list(this.remoteTypes)}${this.mdnsRemote ? ' (mDNS .local)' : ''}`)
+
+    let pairs = 0
+    let succeeded = 0
+    const states = new Set<string>()
+    for (const pc of peers) {
+      const stats = await pc.getStats().catch(() => null)
+      stats?.forEach((r: any) => {
+        if (r.type === 'candidate-pair') {
+          pairs++
+          states.add(r.state)
+          if (r.state === 'succeeded') succeeded++
+        }
+      })
+    }
+    lines.push(`candidate pairs   ${pairs} tried, ${succeeded} succeeded`)
+    if (states.size) lines.push(`pair states       ${[...states].join(', ')}`)
+    lines.push('')
+
+    // say what it most likely means, since the raw fields don't
+    if (this.localTypes.size && !this.remoteTypes.size) {
+      lines.push('the other device never sent any candidates — it may not have')
+      lines.push('got our request, or its own gathering failed.')
+    } else if (pairs > 0 && succeeded === 0) {
+      lines.push('both sides offered addresses and every pair failed. that is')
+      lines.push('the network refusing to carry traffic between two of its own')
+      lines.push('clients — "client isolation", normal on public and guest')
+      lines.push('Wi-Fi. nothing in the app can get around it.')
+    } else if (this.mdnsLocal || this.mdnsRemote) {
+      lines.push('addresses were exchanged as .local mDNS names, which the')
+      lines.push('other device has to resolve over the network. many public')
+      lines.push('networks block that, which leaves nothing to connect to.')
+    }
+    lines.push('')
+    lines.push(...this.events)
+    lines.push(`ua: ${navigator.userAgent}`)
+    return lines.join('\n')
   }
 }
 
