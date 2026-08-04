@@ -148,6 +148,17 @@ export class ConnectLog {
     if (this.localTypes.size && !this.remoteTypes.size) {
       lines.push('the other device never sent any candidates — it may not have')
       lines.push('got our request, or its own gathering failed.')
+    } else if (pairs === 0 && this.mdnsRemote && !this.mdnsLocal) {
+      lines.push('their addresses came as .local mDNS names and ours did not.')
+      lines.push('this device has to look those names up over the network to')
+      lines.push('get an address, and no pair was ever formed — so the lookups')
+      lines.push('returned nothing. that is the network blocking mDNS, which')
+      lines.push('public and guest Wi-Fi commonly does.')
+      lines.push('')
+      lines.push('the other device may still be able to reach us, since our')
+      lines.push('address was sent in the clear. their report will show whether')
+      lines.push('they got pairs — if they did not either, the network is also')
+      lines.push('keeping its clients apart and nothing here can bridge that.')
     } else if (pairs === 0) {
       lines.push('no candidate pairs were formed at all. if both sides listed')
       lines.push('candidates above, they never reached the connection — check')
