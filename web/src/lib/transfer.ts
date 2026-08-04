@@ -19,6 +19,7 @@
  *   either → { t:'abort' }
  */
 
+import { crc32 } from './crc32'
 import { DIAGNOSTICS, TransferDiag, storeReport } from './diagnostics'
 import type { SaveTarget, FileSink } from './saveTarget'
 
@@ -167,6 +168,8 @@ export class Transfer {
   private received: number[] = []
   private manifest: ManifestEntry[] = []
   private sawAllBytes = false
+  /** CRC32 per file as the sender read it; empty until the sums arrive. */
+  private expectedSums: number[] = []
   /**
    * Writes must happen strictly in order, but messages arrive faster than the
    * disk drains — chain every write onto a single promise queue.
@@ -466,6 +469,7 @@ export class Transfer {
         bytes: this.stats.bytesTotal,
       })
       for (const c of open) c.send(manifest)
+      const sums: number[] = []
 
       for (let i = 0; i < files.length; i++) {
         if (stale()) return
@@ -487,10 +491,12 @@ export class Transfer {
         }
 
         let sentForFile = 0
+        let sum = 0
         let inFlight: Promise<ArrayBuffer> | null = readAt(0)
         for (let off = 0; off < file.size; off += READ_BLOCK) {
           if (stale()) return
           const block = await inFlight!
+          sum = crc32(new Uint8Array(block), sum)
           const next = off + READ_BLOCK
           inFlight = next < file.size ? readAt(next) : null
 
@@ -531,11 +537,14 @@ export class Transfer {
           return
         }
 
+        sums[i] = sum
         this.stats.filesDone++
         this.emit(true)
       }
 
       if (stale()) return
+      // what the sender read, so the receiver can check what it stored
+      this.control()?.send(JSON.stringify({ t: 'sums', sums }))
       this.control()?.send(JSON.stringify({ t: 'done' }))
       // not finished yet — only the receiver can say the files actually landed
       this.diag.mark('done-sent')
@@ -575,6 +584,9 @@ export class Transfer {
       // only says the sender has finished handing everything to the wire;
       // chunks may still be in flight, so completion waits on the byte count
       this.sawDone = true
+      this.checkAllReceived()
+    } else if (msg?.t === 'sums') {
+      this.expectedSums = Array.isArray((msg as any).sums) ? (msg as any).sums : []
       this.checkAllReceived()
     } else if (msg?.t === 'ack') {
       clearTimeout(this.ackTimer)
@@ -685,6 +697,29 @@ export class Transfer {
     })
   }
 
+  /**
+   * Read each stored file back and compare it with what the sender read.
+   *
+   * Byte counts already prove nothing was lost in transit; this proves nothing
+   * was put in the wrong place or silently failed to write, which counting
+   * cannot see.
+   */
+  private async verifyAll(): Promise<void> {
+    if (!this.target?.checksum) return
+    for (let i = 0; i < this.manifest.length; i++) {
+      if (this.aborted) return
+      const want = this.expectedSums[i]
+      if (typeof want !== 'number') continue
+      const got = await this.target.checksum(this.manifest[i].n).catch(() => null)
+      if (got === null) continue // this target can't read back; counts still held
+      if (got !== want) {
+        this.fail(`“${this.manifest[i].n}” arrived damaged — ask them to send it again.`)
+        return
+      }
+    }
+    this.diag.mark('verified')
+  }
+
   /** A file has all its bytes — close it and see whether that was the last. */
   private closeFile(index: number): void {
     if (this.closed.has(index)) return
@@ -721,9 +756,14 @@ export class Transfer {
     for (let i = 0; i < this.manifest.length; i++) {
       if ((this.received[i] ?? 0) < this.manifest[i].s) return
     }
+    // the sums are the last thing the sender sends before 'done'; without them
+    // there is nothing to verify against, so wait
+    if (!this.expectedSums.length) return
     this.sawAllBytes = true
     this.flushPending()
     this.enqueue(async () => {
+      await this.verifyAll()
+      if (this.aborted) return
       await this.target?.finish()
       // tell the sender before we settle: this is what lets it report "Sent"
       // truthfully, and it must go out while the channel is still open

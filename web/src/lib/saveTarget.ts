@@ -11,6 +11,8 @@
  * directly from a click handler — never after an `await`.
  */
 
+import { crc32Blob } from './crc32'
+
 interface FsWritable {
   write(
     data: BufferSource | Blob | { type: 'write'; position: number; data: BufferSource }
@@ -22,6 +24,7 @@ interface FsWritable {
 interface FsFileHandle {
   name: string
   createWritable(opts?: { keepExistingData?: boolean }): Promise<FsWritable>
+  getFile(): Promise<File>
 }
 
 interface FsDirHandle {
@@ -59,6 +62,13 @@ export interface SaveTarget {
   finish(): Promise<void>
   /** Transfer aborted — drop whatever was buffered. */
   discard(): void
+  /**
+   * CRC32 of a file as it now exists, or null if this target can't read back.
+   * Reading from the destination rather than from memory is the point: it
+   * verifies what was actually stored, so a bad offset or a failed write is
+   * caught rather than assumed away.
+   */
+  checksum(path: string): Promise<number | null>
 }
 
 /** Strip path separators and other characters that can't be written to disk. */
@@ -94,6 +104,7 @@ function safeSegments(path: string): { dirs: string[]; name: string } {
 /** Streams directly into a user-granted folder, recreating any subfolders. */
 function directoryTarget(dir: FsDirHandle): SaveTarget {
   const used = new Set<string>()
+  const written = new Map<string, FsFileHandle>()
   return {
     label: dir.name,
     async create(path) {
@@ -118,6 +129,7 @@ function directoryTarget(dir: FsDirHandle): SaveTarget {
       used.add([...dirs, final].join('/'))
 
       const handle = await parent.getFileHandle(final, { create: true })
+      written.set(path, handle)
       const writable = await handle.createWritable()
       const owner = parent
       return {
@@ -132,6 +144,11 @@ function directoryTarget(dir: FsDirHandle): SaveTarget {
     },
     async finish() {},
     discard() {},
+    async checksum(path) {
+      const handle = written.get(path)
+      if (!handle) return null
+      return crc32Blob(await handle.getFile())
+    },
   }
 }
 
@@ -151,6 +168,9 @@ function singleFileTarget(handle: FsFileHandle): SaveTarget {
     },
     async finish() {},
     discard() {},
+    async checksum() {
+      return crc32Blob(await handle.getFile())
+    },
   }
 }
 
@@ -208,6 +228,12 @@ function memoryTarget(): SaveTarget {
     },
     discard() {
       files = []
+    },
+    async checksum(path) {
+      const { dirs, name } = safeSegments(path)
+      const key = [...dirs, name].join('/')
+      const found = files.find((f) => f.name === key)
+      return found ? crc32Blob(found.blob) : null
     },
   }
 }
