@@ -51,6 +51,8 @@ const PROGRESS_INTERVAL_MS = 100
  * without building a queue anyone waits on.
  */
 const QUEUE_SECONDS = 0.5
+/** Cap on chunks held while waiting for a manifest that should already be here. */
+const MAX_EARLY_BYTES = 32 * 1024 * 1024
 const MIN_QUEUE = 256 * 1024
 const MAX_QUEUE = 4 * 1024 * 1024
 const LOW_WATER = 128 * 1024
@@ -180,6 +182,7 @@ export class Transfer {
    * held here rather than dropped, and replayed once their sizes are known.
    */
   private early: ArrayBuffer[] = []
+  private earlyBytes = 0
   private lastEmit = 0
   private readonly diag: TransferDiag
   private sawFirstByte = false
@@ -445,15 +448,24 @@ export class Transfer {
     const stale = () => this.aborted || this.finished
     const files = this.files
     try {
-      const control = this.control()
-      if (!control) return
-      control.send(
-        JSON.stringify({
-          t: 'manifest',
-          files: files.map((f) => ({ n: f.name, s: f.size })),
-          bytes: this.stats.bytesTotal,
-        })
-      )
+      const open = this.openChannels()
+      if (!open.length) return
+      // On every link, not just one: chunks go down whichever link is idlest,
+      // so a manifest sent over a single link can be overtaken by data on
+      // another. It is a few hundred bytes and the receiver ignores repeats.
+      // a staged file that reads as empty is almost always a stale handle, not
+      // a genuinely empty file the user meant to send
+      const unreadable = files.find((f) => f.size === 0)
+      if (unreadable && files.some((f) => f.size > 0)) {
+        this.fail(`“${unreadable.name}” is empty or no longer readable — pick it again.`)
+        return
+      }
+      const manifest = JSON.stringify({
+        t: 'manifest',
+        files: files.map((f) => ({ n: f.name, s: f.size })),
+        bytes: this.stats.bytesTotal,
+      })
+      for (const c of open) c.send(manifest)
 
       for (let i = 0; i < files.length; i++) {
         if (stale()) return
@@ -474,6 +486,7 @@ export class Transfer {
           return buf
         }
 
+        let sentForFile = 0
         let inFlight: Promise<ArrayBuffer> | null = readAt(0)
         for (let off = 0; off < file.size; off += READ_BLOCK) {
           if (stale()) return
@@ -501,9 +514,21 @@ export class Transfer {
             payload.set(new Uint8Array(block, p, end - p), HEADER)
             out.send(payload.buffer)
             if (!this.sawFirstByte) { this.sawFirstByte = true; this.diag.mark('first-byte') }
+            sentForFile += end - p
             this.stats.bytesDone += end - p
             this.emit()
           }
+        }
+
+        // A File handle can go stale between being staged and being read —
+        // a picked photo on iOS is the usual way — and it then reads as empty.
+        // Announcing a size and delivering less would hand over a truncated or
+        // 0-byte file that both sides call a success.
+        if (sentForFile !== file.size) {
+          this.fail(
+            `“${file.name}” could not be read in full — pick it again and retry.`
+          )
+          return
         }
 
         this.stats.filesDone++
@@ -530,6 +555,7 @@ export class Transfer {
     if (this.aborted || this.finished) return
     const msg = raw as { t?: string; files?: ManifestEntry[]; bytes?: number; n?: string }
     if (msg?.t === 'manifest') {
+      if (this.manifest.length) return // sent on every link; first one wins
       this.manifest = Array.isArray(msg.files) ? msg.files : []
       this.received = this.manifest.map(() => 0)
       this.stats.filesTotal = this.manifest.length
@@ -538,6 +564,7 @@ export class Transfer {
       // now that sizes are known, the chunks that beat the manifest can land
       const held = this.early
       this.early = []
+      this.earlyBytes = 0
       for (const chunk of held) void this.handleChunk(chunk)
       // an empty file never gets a chunk, so nothing else would ever create it
       for (let i = 0; i < this.manifest.length; i++) {
@@ -567,8 +594,15 @@ export class Transfer {
     const offset = head.getFloat64(4)
     // no manifest yet: hold on to it rather than dropping it on the floor
     if (!this.manifest.length) {
-      // bounded, so a peer that never sends a manifest can't exhaust memory
-      if (this.early.length < 256) this.early.push(buf)
+      // Bounded by bytes so a peer that never sends a manifest can't exhaust
+      // memory — but dropping one of these silently loses part of the file and
+      // leaves it never completing, so it is an error, not a quiet discard.
+      if (this.earlyBytes + buf.byteLength > MAX_EARLY_BYTES) {
+        this.fail('The sender started before saying what it was sending.')
+        return
+      }
+      this.early.push(buf)
+      this.earlyBytes += buf.byteLength
       return
     }
     const entry = this.manifest[index]
@@ -658,6 +692,16 @@ export class Transfer {
     this.flushPending()
     this.enqueue(async () => {
       const sink = await this.sinkFor(index)
+      const want = this.manifest[index]?.s ?? 0
+      const got = this.received[index] ?? 0
+      // closing here would commit whatever did arrive — a short or empty file
+      // handed over as if it were the real one
+      if (got < want) {
+        await sink?.abort().catch(() => {})
+        this.sinks.delete(index)
+        this.fail('The transfer finished early and the file is incomplete.')
+        return
+      }
       await sink?.close()
       this.sinks.delete(index)
       this.stats.filesDone++
