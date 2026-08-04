@@ -150,6 +150,8 @@ export class Transfer {
   private ackTimer: ReturnType<typeof setTimeout> | undefined
   private gatherTimer: ReturnType<typeof setTimeout> | undefined
   private pumping = false
+  /** Candidates for a link that has not been created on this side yet. */
+  private readonly orphanIce = new Map<number, RTCIceCandidateInit[]>()
   private pumpStartedAt = 0
   private finished = false
   private aborted = false
@@ -249,6 +251,13 @@ export class Transfer {
     }
     const link: Link = { index, pc, channel: null, pendingIce: [] }
     this.links[index] = link
+    // candidates that arrived before this link existed are still valid
+    const orphans = this.orphanIce.get(index)
+    if (orphans?.length) {
+      this.clog.note(`link ${index} replaying ${orphans.length} held candidates`)
+      link.pendingIce.push(...orphans)
+      this.orphanIce.delete(index)
+    }
 
     pc.onicecandidate = (ev) => {
       if (ev.candidate) {
@@ -379,6 +388,7 @@ export class Transfer {
     const link = this.openLink(index)
     if (!link) return
     try {
+      this.clog.note(`link ${index} offer received`)
       await link.pc.setRemoteDescription({ type: 'offer', sdp })
       await this.flushIce(link)
       const answer = await link.pc.createAnswer()
@@ -399,6 +409,7 @@ export class Transfer {
     const link = this.links[index]
     if (!link) return
     try {
+      this.clog.note(`link ${index} answer received`)
       await link.pc.setRemoteDescription({ type: 'answer', sdp })
       await this.flushIce(link)
     } catch {
@@ -409,18 +420,40 @@ export class Transfer {
   async handleIce(index: number, candidate: RTCIceCandidateInit): Promise<void> {
     this.clog.candidate('remote', candidate)
     const link = this.links[index]
-    if (!link) return
+    // Trickle ICE starts the moment the sender sets its local description, so
+    // candidates routinely arrive before the offer that creates their link on
+    // this side. Dropping them left ICE with nothing to pair against.
+    if (!link) {
+      const held = this.orphanIce.get(index) ?? []
+      if (held.length < 128) {
+        held.push(candidate)
+        this.orphanIce.set(index, held)
+        this.clog.note(`link ${index} candidate held (no link yet, ${held.length})`)
+      }
+      return
+    }
     if (!link.pc.remoteDescription) {
       link.pendingIce.push(candidate)
       return
     }
-    await link.pc.addIceCandidate(candidate).catch(() => {})
+    await this.addIce(link, candidate)
+  }
+
+  /** Add one candidate, recording why it was refused rather than hiding it. */
+  private async addIce(link: Link, candidate: RTCIceCandidateInit): Promise<void> {
+    try {
+      await link.pc.addIceCandidate(candidate)
+    } catch (err) {
+      this.clog.note(
+        `link ${link.index} candidate rejected: ${err instanceof Error ? err.message : 'unknown'}`
+      )
+    }
   }
 
   private async flushIce(link: Link): Promise<void> {
     const queued = link.pendingIce
     link.pendingIce = []
-    for (const c of queued) await link.pc.addIceCandidate(c).catch(() => {})
+    for (const c of queued) await this.addIce(link, c)
   }
 
   // --- sending -------------------------------------------------------------
