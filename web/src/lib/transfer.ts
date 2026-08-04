@@ -394,6 +394,7 @@ export class Transfer {
       const answer = await link.pc.createAnswer()
       await link.pc.setLocalDescription(answer)
       if (index === 0) this.diag.mark('answer-sent')
+      this.clog.note(`link ${index} answer sent`)
       this.handlers.onSignal({
         t: 'rtc-answer',
         reqId: this.reqId,
@@ -854,17 +855,25 @@ export class Transfer {
     // A connection that never opened is the one failure people need detail on,
     // and there is no transfer running to slow down — so this report is not
     // behind the diagnostics flag.
-    if (!this.sawFirstByte) {
-      const peers = this.links.filter(Boolean).map((l) => l.pc)
-      void this.clog.report(peers).then((text) => {
-        storeReport(text)
-        console.info(`[webshare]\n${text}`)
-        this.handlers.onReport?.(text)
-      })
-    }
     this.publishReport(`failed: ${message}`)
     this.cleanupPartial()
-    this.teardown()
+
+    // Stats have to be read before the connections close: a closed
+    // RTCPeerConnection reports nothing, so tearing down first guaranteed an
+    // empty candidate-pair list and made every failure look identical.
+    if (!this.sawFirstByte) {
+      const peers = this.links.filter(Boolean).map((l) => l.pc)
+      void this.clog
+        .report(peers)
+        .then((text) => {
+          storeReport(text)
+          console.info(`[webshare]\n${text}`)
+          this.handlers.onReport?.(text)
+        })
+        .finally(() => this.teardown())
+    } else {
+      this.teardown()
+    }
     this.handlers.onError(message)
   }
 

@@ -148,6 +148,11 @@ export class ConnectLog {
     if (this.localTypes.size && !this.remoteTypes.size) {
       lines.push('the other device never sent any candidates — it may not have')
       lines.push('got our request, or its own gathering failed.')
+    } else if (pairs === 0) {
+      lines.push('no candidate pairs were formed at all. if both sides listed')
+      lines.push('candidates above, they never reached the connection — check')
+      lines.push('the events below for a rejected candidate or a handshake')
+      lines.push('that stopped partway.')
     } else if (pairs > 0 && succeeded === 0) {
       lines.push('both sides offered addresses and every pair failed. that is')
       lines.push('the network refusing to carry traffic between two of its own')
@@ -158,6 +163,7 @@ export class ConnectLog {
       lines.push('other device has to resolve over the network. many public')
       lines.push('networks block that, which leaves nothing to connect to.')
     }
+    lines.push(`ice states        ${[...states].join(', ') || 'none recorded'}`)
     lines.push('')
     lines.push(...this.events)
     lines.push(`ua: ${navigator.userAgent}`)
